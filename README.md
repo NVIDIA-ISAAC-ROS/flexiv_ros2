@@ -134,7 +134,7 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
    - Test with fake hardware (`ros2_control` capability):
 
      ```bash
-     ros2 launch flexiv_bringup rizon.launch.py robot_sn:=dont-care use_fake_hardware:=true
+     ros2 launch flexiv_bringup rizon.launch.py robot_sn:=Rizon4-123456 use_fake_hardware:=true
      ```
 
 > [!TIP]
@@ -145,7 +145,7 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
    - To send the goal position to the controller by using the node from `flexiv_test_nodes`, start the following command in a new terminal:
 
      ```bash
-     ros2 launch flexiv_bringup test_joint_trajectory_controller.launch.py
+     ros2 launch flexiv_bringup test_joint_trajectory_controller.launch.py robot_sn:=[robot_sn]
      ```
 
      The joint position goals can be changed in `flexiv_bringup/config/joint_trajectory_position_publisher.yaml`
@@ -158,7 +158,7 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
      Open a new terminal and run the launch file:
 
      ```bash
-     ros2 launch flexiv_bringup sine_sweep_impedance.launch.py
+     ros2 launch flexiv_bringup sine_sweep_impedance.launch.py robot_sn:=[robot_sn]
      ```
 
      The robot should run a sine-sweep motion with joint impedance control.
@@ -180,7 +180,7 @@ ros2 launch flexiv_bringup rizon_moveit.launch.py robot_sn:=[robot_sn]
 Test with fake hardware:
 
 ```bash
-ros2 launch flexiv_bringup rizon_moveit.launch.py robot_sn:=dont-care use_fake_hardware:=true
+ros2 launch flexiv_bringup rizon_moveit.launch.py robot_sn:=Rizon4-123456 use_fake_hardware:=true
 ```
 
 ### Robot States
@@ -189,18 +189,18 @@ The robot driver (`rizon.launch.py`) publishes the following feedback states to 
 
 - `/${robot_sn}/flexiv_robot_states`: [Flexiv robot states](https://www.flexiv.com/software/rdk/api/structflexiv_1_1rdk_1_1_robot_states.html) including the joint- and Cartesian-space robot states. [[`flexiv_msgs/msg/RobotStates.msg`](flexiv_msgs/msg/RobotStates.msg)]
 - `/joint_states`: Measured joint states of the robot: joint position, velocity and torque. [[`sensor_msgs/JointState.msg`](https://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/JointState.html)]
-- `/flexiv_robot_states_broadcaster/tcp_pose`: Measured TCP pose expressed in world frame $^{0}T_{TCP}$ in position $[m]$ and quaternion. [[`geometry_msgs/PoseStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/PoseStamped.html)]
-- `/flexiv_robot_states_broadcaster/external_wrench_in_tcp`: Estimated external wrench applied on TCP and expressed in TCP frame $^{TCP}F_{ext}$ in force $[N]$ and torque $[Nm]$. [[`geometry_msgs/WrenchStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/WrenchStamped.html)]
-- `/flexiv_robot_states_broadcaster/external_wrench_in_world`: Estimated external wrench applied on TCP and expressed in world frame $^{0}F_{ext}$ in force $[N]$ and torque $[Nm]$. [[`geometry_msgs/WrenchStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/WrenchStamped.html)]
+- `/${robot_sn}/tcp_pose`: Measured TCP pose expressed in world frame $^{0}T_{TCP}$ in position $[m]$ and quaternion. [[`geometry_msgs/PoseStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/PoseStamped.html)]
+- `/${robot_sn}/external_wrench_in_tcp`: Estimated external wrench applied on TCP and expressed in TCP frame $^{TCP}F_{ext}$ in force $[N]$ and torque $[Nm]$. [[`geometry_msgs/WrenchStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/WrenchStamped.html)]
+- `/${robot_sn}/external_wrench_in_world`: Estimated external wrench applied on TCP and expressed in world frame $^{0}F_{ext}$ in force $[N]$ and torque $[Nm]$. [[`geometry_msgs/WrenchStamped.msg`](https://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/WrenchStamped.html)]
 
 ### GPIO
 
-All digital inputs on the robot control box can be accessed via the ROS topic `/gpio_controller/gpio_inputs`, which publishes the current state of all the 18 *(16 on control box + 2 inside the wrist connector)* digital input ports *(True: port high, false: port low)*.
+All digital inputs on the robot control box can be accessed via the ROS topic `/{robot_sn}/gpio_inputs`, which publishes the current state of all the 18 *(16 on control box + 2 inside the wrist connector)* digital input ports *(True: port high, false: port low)*.
 
-The digital output ports on the control box can be set by publishing to the topic `/gpio_controller/gpio_outputs`. For example:
+The digital output ports on the control box can be set by publishing to the topic `/{robot_sn}/gpio_outputs`. For example:
 
 ```bash
-ros2 topic pub /gpio_controller/gpio_outputs flexiv_msgs/msg/GPIOStates "{states: [{pin: 0, state: true}, {pin: 2, state: true}]}"
+ros2 topic pub /Rizon4_123456/gpio_outputs flexiv_msgs/msg/GPIOStates "{states: [{pin: 0, state: true}, {pin: 2, state: true}]}"
 ```
 
 ### Gripper Control

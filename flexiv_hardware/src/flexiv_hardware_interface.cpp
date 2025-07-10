@@ -206,14 +206,20 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
         if (robot_->fault()) {
             RCLCPP_WARN(getLogger(), "Fault occurred on robot server, trying to clear ...");
             // Try to clear the fault
-            robot_->ClearFault();
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            // Check again
-            if (robot_->fault()) {
+            if (!robot_->ClearFault()) {
                 RCLCPP_FATAL(getLogger(), "Fault cannot be cleared, exiting ...");
                 return hardware_interface::CallbackReturn::ERROR;
             }
             RCLCPP_INFO(getLogger(), "Fault on robot server is cleared");
+        }
+
+        // Check the DoF of the robot
+        if (robot_->info().DoF != kJointDoF) {
+            RCLCPP_FATAL(getLogger(),
+                "Robot has %ld DoF. Expected %ld. External axes control is not supported in ROS 2 "
+                "yet.",
+                robot_->info().DoF, kJointDoF);
+            return hardware_interface::CallbackReturn::ERROR;
         }
 
         // Enable the robot
@@ -221,7 +227,7 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
         robot_->Enable();
 
         // Wait for the robot to become operational
-        while (!robot_->operational(false)) {
+        while (!robot_->operational()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         RCLCPP_INFO(getLogger(), "Robot is now operational");
@@ -253,13 +259,16 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_deactivate(
 hardware_interface::return_type FlexivHardwareInterface::read(
     const rclcpp::Time& /*time*/, const rclcpp::Duration& /*period*/)
 {
-    if (robot_->operational(false) && robot_->mode() != flexiv::rdk::Mode::IDLE) {
+    if (robot_->operational() && robot_->mode() != flexiv::rdk::Mode::IDLE) {
 
         hw_flexiv_robot_states_ = robot_->states();
 
-        hw_states_joint_positions_ = robot_->states().q;
-        hw_states_joint_velocities_ = robot_->states().dtheta;
-        hw_states_joint_efforts_ = robot_->states().tau;
+        // Read joint states
+        for (size_t i = 0; i < info_.joints.size(); i++) {
+            hw_states_joint_positions_[i] = robot_->states().q[i];
+            hw_states_joint_velocities_[i] = robot_->states().dtheta[i];
+            hw_states_joint_efforts_[i] = robot_->states().tau[i];
+        }
 
         // Read GPIO input states
         auto gpio_in = robot_->digital_inputs();
@@ -314,26 +323,29 @@ hardware_interface::return_type FlexivHardwareInterface::write(
     }
 
     // Write digital output
-    std::vector<unsigned int> ports_indices;
-    std::vector<bool> ports_values;
+    std::map<unsigned int, bool> digital_outputs;
     for (size_t i = 0; i < hw_commands_gpio_out_.size(); i++) {
         if (hw_commands_gpio_out_[i] != hw_commands_gpio_out_[i]) {
             continue;
         }
-        ports_indices.push_back(i);
-        ports_values.push_back(static_cast<bool>(hw_commands_gpio_out_[i]));
+        digital_outputs[i] = static_cast<bool>(hw_commands_gpio_out_[i]);
     }
     // Check if there are changes in the digital output values
     bool digital_outputs_changed = false;
-    if (current_ports_indices_ != ports_indices || current_ports_values_ != ports_values) {
-        digital_outputs_changed = true;
+    for (const auto& [index, value] : digital_outputs) {
+        if (current_digital_outputs_[index] != value) {
+            current_digital_outputs_[index] = value;
+            digital_outputs_changed = true;
+        }
     }
-    current_ports_indices_ = ports_indices;
-    current_ports_values_ = ports_values;
+    current_digital_outputs_.clear();
+    for (const auto& [index, value] : digital_outputs) {
+        current_digital_outputs_[index] = value;
+    }
 
     // Set digital outputs
-    if (!ports_indices.empty() && !ports_values.empty() && digital_outputs_changed) {
-        robot_->SetDigitalOutputs(ports_indices, ports_values);
+    if (digital_outputs_changed && !digital_outputs.empty()) {
+        robot_->SetDigitalOutputs(digital_outputs);
     }
 
     return hardware_interface::return_type::OK;

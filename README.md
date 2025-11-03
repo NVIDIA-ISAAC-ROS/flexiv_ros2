@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![docs](https://img.shields.io/badge/docs-sphinx-yellow)](https://www.flexiv.com/software/rdk/manual/ros2_bridge.html)
 
-For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flexiv_rdk), the APIs of RDK are wrapped into ROS packages in `flexiv_ros2`. Key functionalities like real-time joint torque and position control are supported, and the integration with `ros2_control` framework and MoveIt! 2 is also implemented.
+For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flexiv_rdk), the APIs of RDK are wrapped into ROS packages in `flexiv_ros2`. Key functionalities like realtime and non-realtime joint torque and position control are supported, and the integration with `ros2_control` framework and MoveIt! 2 is also implemented.
 
 ## References
 
@@ -12,41 +12,40 @@ For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flex
 
 | **Supported OS** | **Supported ROS 2 distribution**                              |
 | ---------------- | ------------------------------------------------------------- |
-| Ubuntu 20.04     | [Foxy Fitzroy](https://docs.ros.org/en/foxy/index.html)       |
 | Ubuntu 22.04     | [Humble Hawksbill](https://docs.ros.org/en/humble/index.html) |
+| Ubuntu 24.04     | [Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html)     |
 
 ### Release Status
 
-| **ROS 2 Distro**   | Foxy                                                            | Humble                                                |
-| ------------------ | --------------------------------------------------------------- | ----------------------------------------------------- |
-| **Branch**         | [foxy](https://github.com/flexivrobotics/flexiv_ros2/tree/foxy) | [humble](https://github.com/flexivrobotics/flexiv_ros2) |
-| **Release Status** | [![Foxy Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/foxy-binary-build.yml/badge.svg?branch=foxy)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/foxy-binary-build.yml) | [![Humble Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml/badge.svg?branch=humble)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml) |
+| **ROS 2 Distro**   | Humble                                                              | Jazzy                                                 |
+| ------------------ | ------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Branch**         | [humble](https://github.com/flexivrobotics/flexiv_ros2/tree/humble) | [jazzy](https://github.com/flexivrobotics/flexiv_ros2/tree/jazzy) |
+| **Release Status** | [![Humble Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml/badge.svg?branch=humble)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml) | [![Jazzy Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml/badge.svg?branch=jazzy)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml) |
 
 ## Getting Started
 
-This project was developed for ROS 2 Foxy (Ubuntu 20.04) and Humble (Ubuntu 22.04). Other versions of Ubuntu and ROS 2 may work, but are not officially supported.
+This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.04). Other versions of Ubuntu and ROS 2 may work, but are not officially supported.
 
-1. Install [ROS 2 Humble via Debian Packages](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debians.html)
+1. Install [ROS 2 Jazzy via Debian Packages](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debians.html)
 
 2. Install `colcon` and additional ROS packages:
 
    ```bash
    sudo apt install -y \
    python3-colcon-common-extensions \
-   python3-rosdep2 \
    libeigen3-dev \
-   ros-humble-xacro \
-   ros-humble-tinyxml2-vendor \
-   ros-humble-ros2-control \
-   ros-humble-realtime-tools \
-   ros-humble-control-toolbox \
-   ros-humble-moveit \
-   ros-humble-ros2-controllers \
-   ros-humble-test-msgs \
-   ros-humble-joint-state-publisher \
-   ros-humble-joint-state-publisher-gui \
-   ros-humble-robot-state-publisher \
-   ros-humble-rviz2
+   ros-jazzy-xacro \
+   ros-jazzy-tinyxml2-vendor \
+   ros-jazzy-ros2-control \
+   ros-jazzy-realtime-tools \
+   ros-jazzy-control-toolbox \
+   ros-jazzy-moveit \
+   ros-jazzy-ros2-controllers \
+   ros-jazzy-test-msgs \
+   ros-jazzy-joint-state-publisher \
+   ros-jazzy-joint-state-publisher-gui \
+   ros-jazzy-robot-state-publisher \
+   ros-jazzy-rviz2
    ```
 
 3. Setup workspace:
@@ -64,33 +63,25 @@ This project was developed for ROS 2 Foxy (Ubuntu 20.04) and Humble (Ubuntu 22.0
    ```bash
    cd ~/flexiv_ros2_ws
    rosdep update
-   rosdep install --from-paths src --ignore-src --rosdistro humble -r -y
+   rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
    ```
 
-> [!NOTE]
-> Skip step 5 and 6 if you have compile and install [flexiv_rdk](https://github.com/flexivrobotics/flexiv_rdk).
-
-5. Choose a directory for installing `flexiv_rdk` library and all its dependencies. For example, a new folder named `rdk_install` under the home directory: `~/rdk_install`. Compile and install to the installation directory:
-
-   ```bash
-   cd ~/flexiv_ros2_ws/src/flexiv_ros2/flexiv_hardware/rdk/thirdparty
-   bash build_and_install_dependencies.sh ~/rdk_install
-   ```
+5. Choose a directory for installing `flexiv_rdk` library. For example, a new folder named `rdk_install` under the home directory: `~/rdk_install`. NOTE: Do NOT run `rdk/thirdparty/build_and_install_dependencies.sh`, but proceed to the next step directly.
 
 6. Configure and install `flexiv_rdk`:
 
    ```bash
+   source /opt/ros/jazzy/setup.bash
    cd ~/flexiv_ros2_ws/src/flexiv_ros2/flexiv_hardware/rdk
    mkdir build && cd build
-   cmake .. -DCMAKE_INSTALL_PREFIX=~/rdk_install
-   cmake --build . --target install --config Release
+   cmake .. -DCMAKE_INSTALL_PREFIX=~/rdk_install -DRDK_SUPPORT_ROS2_JAZZY=ON
+   make install
    ```
 
 7. Build and source the workspace:
 
    ```bash
    cd ~/flexiv_ros2_ws
-   source /opt/ros/humble/setup.bash
    colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/rdk_install
    source install/setup.bash
    ```
@@ -98,7 +89,7 @@ This project was developed for ROS 2 Foxy (Ubuntu 20.04) and Humble (Ubuntu 22.0
 > [!NOTE]
 > Remember to source the setup file and the workspace whenever a new terminal is opened:
 > ```bash
-> source /opt/ros/humble/setup.bash
+> source /opt/ros/jazzy/setup.bash
 > source ~/flexiv_ros2_ws/install/setup.bash
 > ```
 
@@ -113,11 +104,12 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
 
 - `robot_sn` (*required*) - Serial number of the robot to connect to. Remove any space, for example: Rizon4s-123456
 - `rizon_type` (default: *Rizon4*) - type of the Flexiv Rizon robot. (Rizon4, Rizon4M, Rizon4R, Rizon4s, Rizon10 or Rizon10s)
+- `rdk_control_mode` (default: *joint_position*) - Flexiv RDK control mode for ROS 2 joint position and velocity interfaces. Options: *joint_position* or *joint_impedance*
 - `load_gripper` (default: *false*) - loads the Flexiv Grav gripper as the end-effector of the robot and the gripper control node.
 - `use_fake_hardware` (default: *false*) - starts `FakeSystem` instead of real hardware. This is a simple simulation that mimics joint command to their states.
 - `start_rviz` (deafult: *true*) - starts RViz automatically with the launch file.
 - `fake_sensor_commands` (default: *false*) - enables fake command interfaces for sensors used for simulations. Used only if `use_fake_hardware` parameter is true.
-- `robot_controller` (default: *rizon_arm_controller*) - robot controller to start. Available controllers: *forward_position_controller*, *rizon_arm_controller*, *joint_impedance_controller*.
+- `robot_controller` (default: *rizon_arm_controller*) - robot controller to start. Available controllers: *rizon_arm_controller*
 
 *(Details about other launch files can be found in [`flexiv_bringup`](/flexiv_bringup))*
 
@@ -149,25 +141,6 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
      ```
 
      The joint position goals can be changed in `flexiv_bringup/config/joint_trajectory_position_publisher.yaml`
-   - To test another controller, define it using the `robot_controller` launch argument, for example the `joint_impedance_controller`:
-
-     ```bash
-     ros2 launch flexiv_bringup rizon.launch.py robot_sn:=[robot_sn] robot_controller:=joint_impedance_controller
-     ```
-
-     Open a new terminal and run the launch file:
-
-     ```bash
-     ros2 launch flexiv_bringup sine_sweep_impedance.launch.py robot_sn:=[robot_sn]
-     ```
-
-     The robot should run a sine-sweep motion with joint impedance control.
-
-> [!NOTE]
-> The command starts the robot in the joint torque mode. In this mode, gravity and friction are compensated **only** for the robot **without** any attached objects (e.g. the gripper, camera).
-
-> [!NOTE]
-> Joint impedance control is not supported in fake/simulated hardware.
 
 ### Using MoveIt
 

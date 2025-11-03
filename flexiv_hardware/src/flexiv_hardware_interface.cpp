@@ -27,9 +27,9 @@ constexpr double kMaxJointAcceleration = 3.0;
 namespace flexiv_hardware {
 
 hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
-    const hardware_interface::HardwareInfo& info)
+    const hardware_interface::HardwareComponentInterfaceParams& params)
 {
-    if (hardware_interface::SystemInterface::on_init(info)
+    if (hardware_interface::SystemInterface::on_init(params)
         != hardware_interface::CallbackReturn::SUCCESS) {
         return hardware_interface::CallbackReturn::ERROR;
     }
@@ -122,6 +122,24 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
         robot_sn = info_.hardware_parameters["robot_sn"];
     } catch (const std::out_of_range& ex) {
         RCLCPP_FATAL(getLogger(), "Parameter 'robot_sn' not set");
+        return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    try {
+        auto rdk_control_mode_str = info_.hardware_parameters.at("rdk_control_mode");
+        if (rdk_control_mode_str == "joint_position") {
+            rdk_control_mode_ = flexiv::rdk::Mode::NRT_JOINT_POSITION;
+        } else if (rdk_control_mode_str == "joint_impedance") {
+            rdk_control_mode_ = flexiv::rdk::Mode::NRT_JOINT_IMPEDANCE;
+        } else {
+            RCLCPP_FATAL(getLogger(),
+                "Parameter 'rdk_control_mode' has invalid value '%s'. Options: joint_position, "
+                "joint_impedance",
+                rdk_control_mode_str.c_str());
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+    } catch (const std::out_of_range& ex) {
+        RCLCPP_FATAL(getLogger(), "Parameter 'rdk_control_mode' not set");
         return hardware_interface::CallbackReturn::ERROR;
     }
 
@@ -282,7 +300,6 @@ hardware_interface::return_type FlexivHardwareInterface::write(
     // Initialize target vectors to hold position
     std::vector<double> target_pos(robot_->info().DoF);
     std::vector<double> target_vel(robot_->info().DoF);
-    std::vector<double> target_acc(robot_->info().DoF);
 
     std::vector<double> max_vel(robot_->info().DoF, kMaxJointVelocity);
     std::vector<double> max_acc(robot_->info().DoF, kMaxJointAcceleration);
@@ -302,15 +319,13 @@ hardware_interface::return_type FlexivHardwareInterface::write(
         }
     }
 
-    if (position_controller_running_ && robot_->mode() == flexiv::rdk::Mode::NRT_JOINT_POSITION
-        && !isNanPos) {
+    if (position_controller_running_ && robot_->mode() == rdk_control_mode_ && !isNanPos) {
         target_pos = hw_commands_joint_positions_;
-        robot_->SendJointPosition(target_pos, target_vel, target_acc, max_vel, max_acc);
-    } else if (velocity_controller_running_
-               && robot_->mode() == flexiv::rdk::Mode::NRT_JOINT_POSITION && !isNanVel) {
+        robot_->SendJointPosition(target_pos, target_vel, max_vel, max_acc);
+    } else if (velocity_controller_running_ && robot_->mode() == rdk_control_mode_ && !isNanVel) {
         target_pos = hw_commands_joint_positions_;
         target_vel = hw_commands_joint_velocities_;
-        robot_->SendJointPosition(target_pos, target_vel, target_acc, max_vel, max_acc);
+        robot_->SendJointPosition(target_pos, target_vel, max_vel, max_acc);
     } else if (torque_controller_running_ && robot_->mode() == flexiv::rdk::Mode::RT_JOINT_TORQUE
                && !isNanEff) {
         std::vector<double> target_torque(robot_->info().DoF);
@@ -435,8 +450,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         std::fill(hw_commands_joint_positions_.begin(), hw_commands_joint_positions_.end(),
             std::numeric_limits<double>::quiet_NaN());
 
-        // Set to joint position mode
-        robot_->SwitchMode(flexiv::rdk::Mode::NRT_JOINT_POSITION);
+        // Set to joint position or joint impedance mode
+        robot_->SwitchMode(rdk_control_mode_);
 
         position_controller_running_ = true;
     } else if (start_modes_.size() != 0
@@ -450,8 +465,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         std::fill(hw_commands_joint_velocities_.begin(), hw_commands_joint_velocities_.end(),
             std::numeric_limits<double>::quiet_NaN());
 
-        // Set to joint position mode
-        robot_->SwitchMode(flexiv::rdk::Mode::NRT_JOINT_POSITION);
+        // Set to joint position or joint impedance mode
+        robot_->SwitchMode(rdk_control_mode_);
 
         velocity_controller_running_ = true;
     } else if (start_modes_.size() != 0

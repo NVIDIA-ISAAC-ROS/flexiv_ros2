@@ -34,6 +34,7 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    sudo apt install -y \
    python3-colcon-common-extensions \
    libeigen3-dev \
+   wget \
    ros-jazzy-xacro \
    ros-jazzy-tinyxml2-vendor \
    ros-jazzy-ros2-control \
@@ -53,9 +54,7 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    ```bash
    mkdir -p ~/flexiv_ros2_ws/src
    cd ~/flexiv_ros2_ws/src
-   git clone https://github.com/flexivrobotics/flexiv_ros2.git
-   cd flexiv_ros2/
-   git submodule update --init --recursive
+   git clone https://github.com/flexivrobotics/flexiv_ros2.git -b jazzy
    ```
 
 4. Install dependencies:
@@ -63,19 +62,26 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    ```bash
    cd ~/flexiv_ros2_ws
    vcs import src < src/flexiv_ros2/flexiv.jazzy.repos --recursive --skip-existing
+   touch src/flexiv_rdk/COLCON_IGNORE
    rosdep update
    rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
    ```
 
-5. Choose a directory for installing `flexiv_rdk` library. For example, a new folder named `rdk_install` under the home directory: `~/rdk_install`. NOTE: Do NOT run `rdk/thirdparty/build_and_install_dependencies.sh`, but proceed to the next step directly.
+5. Choose a directory for installing `flexiv_rdk` library and all its dependencies. For example, a new folder named `flexiv_install` under the home directory: `~/flexiv_install`. Compile and install to the installation directory:
+
+   ```bash
+   cd ~/flexiv_ros2_ws/src/flexiv_rdk/thirdparty
+   source /opt/ros/jazzy/setup.bash
+   bash build_and_install_dependencies_not_in_ros2.sh ~/flexiv_install
+   ```
 
 6. Configure and install `flexiv_rdk`:
 
    ```bash
+   cd ~/flexiv_ros2_ws/src/flexiv_rdk
+   rm -rf build && mkdir build && cd build
    source /opt/ros/jazzy/setup.bash
-   cd ~/flexiv_ros2_ws/src/flexiv_ros2/flexiv_hardware/rdk
-   mkdir build && cd build
-   cmake .. -DCMAKE_INSTALL_PREFIX=~/rdk_install -DRDK_SUPPORT_ROS2_JAZZY=ON
+   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install -DRDK_SUPPORT_ROS2_JAZZY=ON
    make install
    ```
 
@@ -83,12 +89,50 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
 
    ```bash
    cd ~/flexiv_ros2_ws
-   colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/rdk_install
+   source /opt/ros/jazzy/setup.bash
+   colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/flexiv_install
    source install/setup.bash
    ```
 
-> [!NOTE]
+### Flexiv DRDK Installation (Optional)
+
+If you are using a Flexiv dual robot setup, you can install `flexiv_drdk` as well.
+
+1. Clone `flexiv_drdk` into the workspace source directory and ignore it from colcon build:
+
+   ```bash
+   cd ~/flexiv_ros2_ws/src
+   git clone https://github.com/flexivrobotics/flexiv_drdk.git -b release/v1.2
+   touch flexiv_drdk/COLCON_IGNORE
+   ```
+
+2. Install dependencies and build `flexiv_drdk` by choosing an installation directory, e.g., `~/flexiv_install`:
+
+   ```bash
+   cd ~/flexiv_ros2_ws/src/flexiv_drdk/thirdparty
+   source /opt/ros/jazzy/setup.bash
+   bash build_and_install_dependencies.sh ~/flexiv_install 8 --skip-rdk
+   ```
+
+3. Configure and install `flexiv_drdk`:
+
+   ```bash
+   cd ~/flexiv_ros2_ws/src/flexiv_drdk
+   rm -rf build && mkdir build && cd build
+   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install -DDRDK_SUPPORT_ROS2_JAZZY=ON
+   make install
+   ```
+
+4. Rebuild the workspace with `flexiv_drdk` included:
+
+   ```bash
+   cd ~/flexiv_ros2_ws
+   colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/flexiv_install
+   ```
+
+> [!IMPORTANT]
 > Remember to source the setup file and the workspace whenever a new terminal is opened:
+>
 > ```bash
 > source /opt/ros/jazzy/setup.bash
 > source ~/flexiv_ros2_ws/install/setup.bash
@@ -108,7 +152,7 @@ The main launch file to start the robot driver is the `rizon.launch.py` - it loa
 - `rdk_control_mode` (default: *joint_position*) - Flexiv RDK control mode for ROS 2 joint position and velocity interfaces. Options: *joint_position* or *joint_impedance*
 - `load_gripper` (default: *false*) - loads the Flexiv Grav gripper as the end-effector of the robot and the gripper control node.
 - `use_fake_hardware` (default: *false*) - starts `FakeSystem` instead of real hardware. This is a simple simulation that mimics joint command to their states.
-- `start_rviz` (deafult: *true*) - starts RViz automatically with the launch file.
+- `start_rviz` (default: *true*) - starts RViz automatically with the launch file.
 - `fake_sensor_commands` (default: *false*) - enables fake command interfaces for sensors used for simulations. Used only if `use_fake_hardware` parameter is true.
 - `robot_controller` (default: *rizon_arm_controller*) - robot controller to start. Available controllers: *rizon_arm_controller*
 
@@ -155,6 +199,12 @@ Test with fake hardware:
 
 ```bash
 ros2 launch flexiv_bringup rizon_moveit.launch.py robot_sn:=Rizon4-123456 use_fake_hardware:=true
+```
+
+With dual robot setup:
+
+```bash
+ros2 launch flexiv_bringup rizon_dual_moveit.launch.py robot_sn_left:=Rizon4-123456 robot_sn_right:=Rizon4R-654321
 ```
 
 ### Robot States

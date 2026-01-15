@@ -360,29 +360,29 @@ hardware_interface::return_type FlexivHardwareInterface::write(
     std::vector<double> max_vel(robot_->info().DoF, kMaxJointVelocity);
     std::vector<double> max_acc(robot_->info().DoF, kMaxJointAcceleration);
 
-    bool isNanPos = false;
-    bool isNanVel = false;
-    bool isNanEff = false;
+    bool is_pos_nan = false;
+    bool is_vel_nan = false;
+    bool is_eff_nan = false;
     for (std::size_t i = 0; i < robot_->info().DoF; i++) {
         if (hw_commands_joint_positions_[i] != hw_commands_joint_positions_[i]) {
-            isNanPos = true;
+            is_pos_nan = true;
         }
         if (hw_commands_joint_velocities_[i] != hw_commands_joint_velocities_[i]) {
-            isNanVel = true;
+            is_vel_nan = true;
         }
         if (hw_commands_joint_efforts_[i] != hw_commands_joint_efforts_[i]) {
-            isNanEff = true;
+            is_eff_nan = true;
         }
     }
 
-    if (position_controller_running_ && robot_->mode() == rdk_control_mode_ && !isNanPos) {
+    if (position_controller_running_ && robot_->mode() == rdk_control_mode_ && !is_pos_nan) {
         // Map ROS commands to RDK targets
         for (size_t rdk_idx = 0; rdk_idx < robot_->info().DoF; ++rdk_idx) {
             size_t ros_idx = rdk_to_ros_map_[rdk_idx];
             target_pos[rdk_idx] = hw_commands_joint_positions_[ros_idx];
         }
         robot_->SendJointPosition(target_pos, target_vel, max_vel, max_acc);
-    } else if (velocity_controller_running_ && robot_->mode() == rdk_control_mode_ && !isNanVel) {
+    } else if (velocity_controller_running_ && robot_->mode() == rdk_control_mode_ && !is_vel_nan) {
         // Map ROS commands/states to RDK targets
         for (size_t rdk_idx = 0; rdk_idx < robot_->info().DoF; ++rdk_idx) {
             size_t ros_idx = rdk_to_ros_map_[rdk_idx];
@@ -391,7 +391,7 @@ hardware_interface::return_type FlexivHardwareInterface::write(
         }
         robot_->SendJointPosition(target_pos, target_vel, max_vel, max_acc);
     } else if (torque_controller_running_ && robot_->mode() == flexiv::rdk::Mode::RT_JOINT_TORQUE
-               && !isNanEff) {
+               && !is_eff_nan) {
         std::vector<double> target_torque(robot_->info().DoF);
         // Map ROS commands to RDK targets
         for (size_t rdk_idx = 0; rdk_idx < robot_->info().DoF; ++rdk_idx) {

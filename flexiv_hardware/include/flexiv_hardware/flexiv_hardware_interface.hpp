@@ -9,17 +9,27 @@
 #ifndef FLEXIV_HARDWARE__FLEXIV_HARDWARE_INTERFACE_HPP_
 #define FLEXIV_HARDWARE__FLEXIV_HARDWARE_INTERFACE_HPP_
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 // ROS
+#include <rclcpp/rclcpp.hpp>
 #include <rclcpp/clock.hpp>
 #include <rclcpp/duration.hpp>
 #include <rclcpp/macros.hpp>
 #include <rclcpp/logger.hpp>
 #include <rclcpp/time.hpp>
 #include <rclcpp_lifecycle/state.hpp>
+
+// Flexiv msgs
+#include "flexiv_msgs/srv/set_cartesian_impedance.hpp"
+#include "flexiv_msgs/srv/set_null_space_posture.hpp"
+#include "flexiv_msgs/srv/set_max_contact_wrench.hpp"
+#include "flexiv_msgs/srv/set_force_control_frame.hpp"
+#include "flexiv_msgs/srv/set_force_control_axis.hpp"
 
 // ros2_control hardware_interface
 #include <hardware_interface/handle.hpp>
@@ -41,8 +51,15 @@ enum StoppingInterface
     NONE,
     STOP_POSITION,
     STOP_VELOCITY,
-    STOP_EFFORT
+    STOP_EFFORT,
+    STOP_CARTESIAN
 };
+
+/** Cartesian pose array size: [x, y, z, qw, qx, qy, qz] */
+constexpr size_t kCartPoseSize = 7;
+
+/** Cartesian space degrees of freedom: [Fx, Fy, Fz, Mx, My, Mz] */
+constexpr size_t kCartDoF = 6;
 
 class FlexivHardwareInterface : public hardware_interface::SystemInterface
 {
@@ -93,6 +110,14 @@ private:
     std::vector<double> hw_states_joint_velocities_;
     std::vector<double> hw_states_joint_efforts_;
 
+    // Cartesian commands and states
+    std::array<double, kCartPoseSize> hw_commands_cartesian_pose_;
+    std::array<double, kCartDoF> hw_commands_cartesian_wrench_;
+    std::array<double, kCartDoF> hw_commands_cartesian_velocity_;
+    std::array<double, kCartDoF> hw_commands_cartesian_acceleration_;
+    std::array<double, kCartPoseSize> hw_states_cartesian_pose_;
+    std::array<double, kCartDoF> hw_states_cartesian_velocity_;
+
     // Robot States
     flexiv::rdk::RobotStates hw_flexiv_robot_states_;
     flexiv::rdk::RobotStates* hw_flexiv_robot_states_addr_ = &hw_flexiv_robot_states_;
@@ -106,13 +131,44 @@ private:
 
     static rclcpp::Logger getLogger();
 
-    // control modes
+    // Controller mode tracking
     bool controllers_initialized_;
     std::vector<uint> stop_modes_;
     std::vector<std::string> start_modes_;
     bool position_controller_running_;
     bool velocity_controller_running_;
     bool torque_controller_running_;
+    bool cartesian_motion_controller_running_;
+    bool cartesian_mode_active_;
+    std::array<double, kCartPoseSize> init_tcp_pose_;
+
+    bool isCartesianCommandValid() const;
+
+    // Cartesian configuration services (run in a dedicated thread)
+    rclcpp::Node::SharedPtr service_node_;
+    std::thread service_thread_;
+    std::atomic<bool> service_thread_running_{false};
+    rclcpp::Service<flexiv_msgs::srv::SetCartesianImpedance>::SharedPtr set_cartesian_impedance_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetNullSpacePosture>::SharedPtr set_null_space_posture_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetMaxContactWrench>::SharedPtr set_max_contact_wrench_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetForceControlFrame>::SharedPtr set_force_control_frame_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetForceControlAxis>::SharedPtr set_force_control_axis_srv_;
+
+    void setCartesianImpedanceCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Response> response);
+    void setNullSpacePostureCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Response> response);
+    void setMaxContactWrenchCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Response> response);
+    void setForceControlFrameCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Response> response);
+    void setForceControlAxisCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Response> response);
 };
 
 } /* namespace flexiv_hardware */

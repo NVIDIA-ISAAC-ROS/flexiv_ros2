@@ -1,0 +1,9 @@
+# Set Cartesian impedance properties
+# stiffness: [kx, ky, kz, kRx, kRy, kRz] in [N/m]:[Nm/rad]
+# damping_ratio: [zx, zy, zz, zRx, zRy, zRz], valid range [0.3, 0.8]
+
+float64[6] stiffness
+float64[6] damping_ratio
+---
+bool success
+string message

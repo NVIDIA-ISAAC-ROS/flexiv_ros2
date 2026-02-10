@@ -1,12 +1,16 @@
+"""
+Launch file for Flexiv Rizon robot with Cartesian motion-force control.
+This launch file sets up the robot in RT_CARTESIAN_MOTION_FORCE mode for
+real-time Cartesian pure motion control.
+"""
+
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
-    IncludeLaunchDescription,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile, ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -21,14 +25,10 @@ from launch.substitutions import (
 def generate_launch_description():
     rizon_type_param_name = "rizon_type"
     robot_sn_param_name = "robot_sn"
-    rdk_control_mode_param_name = "rdk_control_mode"
     start_rviz_param_name = "start_rviz"
-    load_gripper_param_name = "load_gripper"
-    gripper_name_param_name = "gripper_name"
     load_mounted_ft_sensor_param_name = "load_mounted_ft_sensor"
     use_fake_hardware_param_name = "use_fake_hardware"
     fake_sensor_commands_param_name = "fake_sensor_commands"
-    robot_controller_param_name = "robot_controller"
 
     # Declare arguments
     declared_arguments = []
@@ -51,15 +51,6 @@ def generate_launch_description():
 
     declared_arguments.append(
         DeclareLaunchArgument(
-            rdk_control_mode_param_name,
-            default_value="joint_position",
-            description="RDK control mode for joint controllers. For Cartesian mode, use rizon_cartesian.launch.py",
-            choices=["joint_position", "joint_impedance"],
-        )
-    )
-
-    declared_arguments.append(
-        DeclareLaunchArgument(
             start_rviz_param_name,
             default_value="true",
             description="Start RViz automatically with the launch file",
@@ -68,25 +59,9 @@ def generate_launch_description():
 
     declared_arguments.append(
         DeclareLaunchArgument(
-            load_gripper_param_name,
-            default_value="false",
-            description="Flag to load the Flexiv Grav gripper as the end-effector of the robot.",
-        )
-    )
-
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            gripper_name_param_name,
-            default_value="Flexiv-GN01",
-            description="Full name of the gripper to be controlled, can be found in Flexiv Elements -> Settings -> Device",
-        )
-    )
-
-    declared_arguments.append(
-        DeclareLaunchArgument(
             load_mounted_ft_sensor_param_name,
             default_value="false",
-            description="Flag to load the mounted force torque sensor. Only available for Rizon4, Rizon4R and Rizon10.",
+            description="Flag to load the mounted force torque sensor.",
         )
     )
 
@@ -102,37 +77,26 @@ def generate_launch_description():
         DeclareLaunchArgument(
             fake_sensor_commands_param_name,
             default_value="false",
-            description="Enable fake command interfaces for sensors used for simple simulations. \
-            Used only if 'use_fake_hardware' parameter is true.",
-        )
-    )
-
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            robot_controller_param_name,
-            default_value="rizon_arm_controller",
-            description="Robot controller to start. Available: rizon_arm_controller",
+            description="Enable fake command interfaces for sensors.",
         )
     )
 
     # Initialize Arguments
     rizon_type = LaunchConfiguration(rizon_type_param_name)
     robot_sn = LaunchConfiguration(robot_sn_param_name)
-    rdk_control_mode = LaunchConfiguration(rdk_control_mode_param_name)
     start_rviz = LaunchConfiguration(start_rviz_param_name)
-    load_gripper = LaunchConfiguration(load_gripper_param_name)
-    gripper_name = LaunchConfiguration(gripper_name_param_name)
     load_mounted_ft_sensor = LaunchConfiguration(load_mounted_ft_sensor_param_name)
     use_fake_hardware = LaunchConfiguration(use_fake_hardware_param_name)
     fake_sensor_commands = LaunchConfiguration(fake_sensor_commands_param_name)
-    robot_controller = LaunchConfiguration(robot_controller_param_name)
+
+    # Fixed to cartesian_motion_force mode
+    rdk_control_mode = "cartesian_motion_force"
 
     # Get URDF via xacro
     flexiv_urdf_xacro = PathJoinSubstitution(
         [FindPackageShare("flexiv_description"), "urdf", "rizon.urdf.xacro"]
     )
 
-    # Get URDF via xacro
     robot_description_content = ParameterValue(
         Command(
             [
@@ -149,11 +113,7 @@ def generate_launch_description():
                 "rdk_control_mode:=",
                 rdk_control_mode,
                 " ",
-                "load_gripper:=",
-                load_gripper,
-                " ",
-                "gripper_name:=",
-                gripper_name,
+                "load_gripper:=false",
                 " ",
                 "load_mounted_ft_sensor:=",
                 load_mounted_ft_sensor,
@@ -184,9 +144,9 @@ def generate_launch_description():
         condition=IfCondition(start_rviz),
     )
 
-    # Robot controllers
+    # Robot controllers for Cartesian mode
     robot_controllers = PathJoinSubstitution(
-        [FindPackageShare("flexiv_bringup"), "config", "rizon_controllers.yaml"]
+        [FindPackageShare("flexiv_bringup"), "config", "rizon_cartesian_controllers.yaml"]
     )
 
     # Controller Manager
@@ -210,10 +170,7 @@ def generate_launch_description():
         name="joint_state_publisher",
         parameters=[
             {
-                "source_list": [
-                    "flexiv_arm/joint_states",
-                    "flexiv_gripper_node/gripper_joint_states",
-                ],
+                "source_list": ["flexiv_arm/joint_states"],
                 "rate": 30,
             }
         ],
@@ -226,13 +183,6 @@ def generate_launch_description():
         name="robot_state_publisher",
         output="both",
         parameters=[robot_description],
-    )
-
-    # Run robot controller
-    robot_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=[robot_controller, "--controller-manager", "/controller_manager"],
     )
 
     # Run joint state broadcaster
@@ -255,48 +205,25 @@ def generate_launch_description():
         condition=UnlessCondition(use_fake_hardware),
     )
 
-    # Include gripper launch file
-    load_gripper_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution(
-                [
-                    FindPackageShare("flexiv_gripper"),
-                    "launch",
-                    "flexiv_gripper.launch.py",
-                ]
-            )
-        ),
-        launch_arguments={
-            "robot_sn": robot_sn,
-            "gripper_name": gripper_name,
-            "use_fake_hardware": use_fake_hardware,
-        }.items(),
-        condition=IfCondition(load_gripper),
-    )
-
-    # Run gpio controller
-    gpio_controller_spawner = Node(
+    # Run Cartesian motion controller
+    cartesian_motion_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["gpio_controller", "--controller-manager", "/controller_manager"],
-        parameters=[{"robot_sn": robot_sn}],
-        condition=UnlessCondition(use_fake_hardware),
+        arguments=["cartesian_motion_controller", "--controller-manager", "/controller_manager"],
     )
 
-    # Delay start of robot_controller after `joint_state_broadcaster`
-    delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = (
-        RegisterEventHandler(
-            event_handler=OnProcessExit(
-                target_action=joint_state_broadcaster_spawner,
-                on_exit=[robot_controller_spawner],
-            )
+    # Delay start of cartesian_motion_controller after joint_state_broadcaster
+    delay_cartesian_controller_spawner = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[cartesian_motion_controller_spawner],
         )
     )
 
-    # Delay rviz start after `robot_controller_spawner`
-    delay_rviz_after_robot_controller_spawner = RegisterEventHandler(
+    # Delay rviz start after cartesian_motion_controller_spawner
+    delay_rviz_after_controller_spawner = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=robot_controller_spawner,
+            target_action=cartesian_motion_controller_spawner,
             on_exit=[rviz_node],
         )
     )
@@ -307,10 +234,8 @@ def generate_launch_description():
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         flexiv_robot_states_broadcaster_spawner,
-        load_gripper_launch,
-        gpio_controller_spawner,
-        delay_robot_controller_spawner_after_joint_state_broadcaster_spawner,
-        delay_rviz_after_robot_controller_spawner,
+        delay_cartesian_controller_spawner,
+        delay_rviz_after_controller_spawner,
     ]
 
     return LaunchDescription(declared_arguments + nodes)

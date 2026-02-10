@@ -8,6 +8,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
 set(msg_files
+  msg/CartesianMotionForceCommand.msg
   msg/Digital.msg
   msg/GPIOStates.msg
   msg/JointPosVel.msg
@@ -15,8 +16,13 @@ set(msg_files
   msg/RobotStates.msg
 )
 
-# set(srv_files
-# )
+set(srv_files
+  srv/SetCartesianImpedance.srv
+  srv/SetNullSpacePosture.srv
+  srv/SetMaxContactWrench.srv
+  srv/SetForceControlFrame.srv
+  srv/SetForceControlAxis.srv
+)
 
 set(action_files
   action/Grasp.action
@@ -25,7 +31,7 @@ set(action_files
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
-  # ${srv_files}
+  ${srv_files}
   ${action_files}
   DEPENDENCIES
     std_msgs

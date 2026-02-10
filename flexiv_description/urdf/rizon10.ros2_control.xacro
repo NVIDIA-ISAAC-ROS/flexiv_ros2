@@ -4,6 +4,7 @@
   <xacro:macro name="rizon10_ros2_control" params="
     prefix
     robot_sn
+    rdk_control_mode
     use_fake_hardware:=false
     fake_sensor_commands:=false
     ">
@@ -19,6 +20,7 @@
           <plugin>flexiv_hardware/FlexivHardwareInterface</plugin>
           <param name="robot_sn">${robot_sn}</param>
           <param name="prefix">${prefix}</param>
+          <param name="rdk_control_mode">${rdk_control_mode}</param>
         </xacro:unless>
       </hardware>
 
@@ -181,6 +183,33 @@
         <state_interface name="digital_input_15"/>
         <state_interface name="digital_input_16"/>
         <state_interface name="digital_input_17"/>
+      </gpio>
+
+      <!-- TCP Cartesian interfaces for motion-force control -->
+      <gpio name="${prefix}tcp">
+        <!-- Cartesian pose command interfaces (x, y, z, qw, qx, qy, qz) -->
+        <command_interface name="cartesian_pose_x"/>
+        <command_interface name="cartesian_pose_y"/>
+        <command_interface name="cartesian_pose_z"/>
+        <command_interface name="cartesian_pose_qw"/>
+        <command_interface name="cartesian_pose_qx"/>
+        <command_interface name="cartesian_pose_qy"/>
+        <command_interface name="cartesian_pose_qz"/>
+        <!-- Cartesian wrench command interfaces (fx, fy, fz, mx, my, mz) -->
+        <command_interface name="cartesian_wrench_fx"/>
+        <command_interface name="cartesian_wrench_fy"/>
+        <command_interface name="cartesian_wrench_fz"/>
+        <command_interface name="cartesian_wrench_mx"/>
+        <command_interface name="cartesian_wrench_my"/>
+        <command_interface name="cartesian_wrench_mz"/>
+        <!-- Cartesian pose state interfaces -->
+        <state_interface name="cartesian_pose_x"/>
+        <state_interface name="cartesian_pose_y"/>
+        <state_interface name="cartesian_pose_z"/>
+        <state_interface name="cartesian_pose_qw"/>
+        <state_interface name="cartesian_pose_qx"/>
+        <state_interface name="cartesian_pose_qy"/>
+        <state_interface name="cartesian_pose_qz"/>
       </gpio>
 
     </ros2_control>

@@ -1,0 +1,10 @@
+<library path="cartesian_motion_controller">
+  <class name="cartesian_motion_controller/CartesianMotionController"
+         type="cartesian_motion_controller::CartesianMotionController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Controller for Flexiv robot real-time Cartesian motion-force control.
+      Subscribes to CartesianMotionForceCommand messages and sends them to the hardware interface.
+    </description>
+  </class>
+</library>

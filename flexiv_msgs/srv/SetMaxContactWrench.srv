@@ -1,0 +1,8 @@
+# Set maximum contact wrench for motion control
+# max_wrench: [fx, fy, fz, mx, my, mz] in [N]:[Nm]
+# Set to infinity to disable regulation
+
+float64[6] max_wrench
+---
+bool success
+string message

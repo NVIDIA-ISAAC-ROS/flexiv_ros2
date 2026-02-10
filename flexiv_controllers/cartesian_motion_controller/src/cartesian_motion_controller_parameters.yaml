@@ -1,0 +1,7 @@
+cartesian_motion_controller:
+  tcp_name:
+    type: string
+    default_value: ""
+    description: "Name of the TCP interface (e.g., 'tcp' or with prefix 'rizon4s_123456_tcp')"
+    validation:
+      not_empty<>: null

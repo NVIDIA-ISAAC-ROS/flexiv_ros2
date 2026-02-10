@@ -1,0 +1,20 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    cartesian_motion_controller:
+      type: cartesian_motion_controller/CartesianMotionController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    flexiv_robot_states_broadcaster:
+      type: flexiv_robot_states_broadcaster/FlexivRobotStatesBroadcaster
+
+cartesian_motion_controller:
+  ros__parameters:
+    tcp_name: $(var robot_sn)_tcp
+
+flexiv_robot_states_broadcaster:
+  ros__parameters:
+    robot_sn: $(var robot_sn)

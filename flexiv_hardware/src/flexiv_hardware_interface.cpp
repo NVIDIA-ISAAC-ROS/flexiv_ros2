@@ -332,6 +332,24 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
 
     // Switch to Cartesian mode early (before RT loop) to avoid blocking 1kHz control
     if (rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        // Zero force-torque sensor
+        RCLCPP_WARN(getLogger(),
+            "Zeroing force/torque sensor. Make sure nothing is in contact with the robot.");
+        try {
+            robot_->SwitchMode(flexiv::rdk::Mode::NRT_PRIMITIVE_EXECUTION);
+            robot_->ExecutePrimitive("ZeroFTSensor", std::map<std::string, flexiv::rdk::FlexivDataTypes>{});
+            
+            // Wait for primitive to finish
+            while (!std::get<int>(robot_->primitive_states()["terminated"])) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            RCLCPP_INFO(getLogger(), "Sensor zeroing complete");
+        } catch (const std::exception& e) {
+            RCLCPP_FATAL(getLogger(), "Failed to zero force/torque sensor");
+            RCLCPP_FATAL(getLogger(), e.what());
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+
         init_tcp_pose_ = robot_->states().tcp_pose;
         robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
         robot_->SetForceControlAxis(

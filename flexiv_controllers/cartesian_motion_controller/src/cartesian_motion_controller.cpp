@@ -164,23 +164,76 @@ controller_interface::return_type CartesianMotionController::update(
     if (command_ptr && *command_ptr) {
         const auto& cmd = *command_ptr;
 
+        // Validate quaternion orientation
+        double qw = cmd->target_pose.orientation.w;
+        double qx = cmd->target_pose.orientation.x;
+        double qy = cmd->target_pose.orientation.y;
+        double qz = cmd->target_pose.orientation.z;
+        double quat_norm = std::sqrt(qw * qw + qx * qx + qy * qy + qz * qz);
+
+        if (std::abs(quat_norm - 1.0) > 0.01) {
+            RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                "Invalid quaternion (norm = %.4f, expected 1.0). Normalizing.", quat_norm);
+            
+            // Normalize quaternion
+            if (quat_norm > 1e-6) {
+                qw /= quat_norm;
+                qx /= quat_norm;
+                qy /= quat_norm;
+                qz /= quat_norm;
+            } else {
+                RCLCPP_ERROR_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                    "Quaternion norm is near zero. Using identity orientation.");
+                qw = 1.0;
+                qx = qy = qz = 0.0;
+            }
+        }
+
+        // Validate position (check for NaN and Inf)
+        if (!std::isfinite(cmd->target_pose.position.x) || 
+            !std::isfinite(cmd->target_pose.position.y) ||
+            !std::isfinite(cmd->target_pose.position.z)) {
+            RCLCPP_ERROR_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                "Invalid position command (NaN or Inf detected). Skipping command.");
+            return controller_interface::return_type::OK;
+        }
+
+        // Write validated pose commands
         if (cartesian_pose_command_interfaces_.size() == kCartPoseSize) {
             (void)cartesian_pose_command_interfaces_[0].get().set_value(cmd->target_pose.position.x);
             (void)cartesian_pose_command_interfaces_[1].get().set_value(cmd->target_pose.position.y);
             (void)cartesian_pose_command_interfaces_[2].get().set_value(cmd->target_pose.position.z);
-            (void)cartesian_pose_command_interfaces_[3].get().set_value(cmd->target_pose.orientation.w);
-            (void)cartesian_pose_command_interfaces_[4].get().set_value(cmd->target_pose.orientation.x);
-            (void)cartesian_pose_command_interfaces_[5].get().set_value(cmd->target_pose.orientation.y);
-            (void)cartesian_pose_command_interfaces_[6].get().set_value(cmd->target_pose.orientation.z);
+            (void)cartesian_pose_command_interfaces_[3].get().set_value(qw);
+            (void)cartesian_pose_command_interfaces_[4].get().set_value(qx);
+            (void)cartesian_pose_command_interfaces_[5].get().set_value(qy);
+            (void)cartesian_pose_command_interfaces_[6].get().set_value(qz);
         }
 
+        // Validate and write wrench commands
         if (cartesian_wrench_command_interfaces_.size() == kCartDoF) {
-            (void)cartesian_wrench_command_interfaces_[0].get().set_value(cmd->target_wrench.force.x);
-            (void)cartesian_wrench_command_interfaces_[1].get().set_value(cmd->target_wrench.force.y);
-            (void)cartesian_wrench_command_interfaces_[2].get().set_value(cmd->target_wrench.force.z);
-            (void)cartesian_wrench_command_interfaces_[3].get().set_value(cmd->target_wrench.torque.x);
-            (void)cartesian_wrench_command_interfaces_[4].get().set_value(cmd->target_wrench.torque.y);
-            (void)cartesian_wrench_command_interfaces_[5].get().set_value(cmd->target_wrench.torque.z);
+            // Check for valid wrench values
+            bool wrench_valid = std::isfinite(cmd->target_wrench.force.x) &&
+                                std::isfinite(cmd->target_wrench.force.y) &&
+                                std::isfinite(cmd->target_wrench.force.z) &&
+                                std::isfinite(cmd->target_wrench.torque.x) &&
+                                std::isfinite(cmd->target_wrench.torque.y) &&
+                                std::isfinite(cmd->target_wrench.torque.z);
+
+            if (wrench_valid) {
+                (void)cartesian_wrench_command_interfaces_[0].get().set_value(cmd->target_wrench.force.x);
+                (void)cartesian_wrench_command_interfaces_[1].get().set_value(cmd->target_wrench.force.y);
+                (void)cartesian_wrench_command_interfaces_[2].get().set_value(cmd->target_wrench.force.z);
+                (void)cartesian_wrench_command_interfaces_[3].get().set_value(cmd->target_wrench.torque.x);
+                (void)cartesian_wrench_command_interfaces_[4].get().set_value(cmd->target_wrench.torque.y);
+                (void)cartesian_wrench_command_interfaces_[5].get().set_value(cmd->target_wrench.torque.z);
+            } else {
+                RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                    "Invalid wrench command (NaN or Inf detected). Using zero wrench.");
+                // Write zeros for safety
+                for (size_t i = 0; i < kCartDoF; ++i) {
+                    (void)cartesian_wrench_command_interfaces_[i].get().set_value(0.0);
+                }
+            }
         }
     }
 

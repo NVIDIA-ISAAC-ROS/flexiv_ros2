@@ -1,0 +1,6 @@
+# Set the reference frame for force control
+# Options: "world" or "tcp"
+string frame
+---
+bool success
+string message

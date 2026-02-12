@@ -1,0 +1,7 @@
+# Set reference joint positions for null-space posture control
+# ref_positions: [rad] for each joint
+
+float64[7] ref_positions
+---
+bool success
+string message

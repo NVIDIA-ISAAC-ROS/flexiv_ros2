@@ -15,6 +15,7 @@ from launch.substitutions import (
     FindExecutable,
     LaunchConfiguration,
     PathJoinSubstitution,
+    PythonExpression,
 )
 
 
@@ -29,6 +30,9 @@ def generate_launch_description():
     use_fake_hardware_param_name = "use_fake_hardware"
     fake_sensor_commands_param_name = "fake_sensor_commands"
     robot_controller_param_name = "robot_controller"
+    external_axis_type_param_name = "external_axis_type"
+    external_axis_prefix_param_name = "external_axis_prefix"
+    arm_prefix_param_name = "arm_prefix"
 
     # Declare arguments
     declared_arguments = []
@@ -38,7 +42,7 @@ def generate_launch_description():
             rizon_type_param_name,
             description="Type of the Flexiv Rizon robot.",
             default_value="Rizon4",
-            choices=["Rizon4", "Rizon4M", "Rizon4R", "Rizon4s", "Rizon10", "Rizon10s"],
+            choices=["Rizon4", "Rizon4s"],
         )
     )
 
@@ -115,6 +119,31 @@ def generate_launch_description():
         )
     )
 
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            external_axis_type_param_name,
+            default_value="AICO1-4-V1",
+            description="Type of the AICO1 platform.",
+            choices=["AICO1-4-V1", "AICO1-4-V2"],
+        )
+    )
+
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            external_axis_prefix_param_name,
+            default_value="",
+            description="Prefix for the external axis links and joints.",
+        )
+    )
+
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            arm_prefix_param_name,
+            default_value="",
+            description="Prefix for the arm links and joints.",
+        )
+    )
+
     # Initialize Arguments
     rizon_type = LaunchConfiguration(rizon_type_param_name)
     robot_sn = LaunchConfiguration(robot_sn_param_name)
@@ -126,10 +155,13 @@ def generate_launch_description():
     use_fake_hardware = LaunchConfiguration(use_fake_hardware_param_name)
     fake_sensor_commands = LaunchConfiguration(fake_sensor_commands_param_name)
     robot_controller = LaunchConfiguration(robot_controller_param_name)
+    external_axis_type = LaunchConfiguration(external_axis_type_param_name)
+    external_axis_prefix = LaunchConfiguration(external_axis_prefix_param_name)
+    arm_prefix = LaunchConfiguration(arm_prefix_param_name)
 
     # Get URDF via xacro
     flexiv_urdf_xacro = PathJoinSubstitution(
-        [FindPackageShare("flexiv_description"), "urdf", "rizon.urdf.xacro"]
+        [FindPackageShare("flexiv_description"), "urdf", "aico1.urdf.xacro"]
     )
 
     # Get URDF via xacro
@@ -164,6 +196,17 @@ def generate_launch_description():
                 " ",
                 "fake_sensor_commands:=",
                 fake_sensor_commands,
+                " ",
+                "external_axis_type:=",
+                PythonExpression(
+                    ["'", external_axis_type, "'.lower().replace('-', '_')"]
+                ),
+                " ",
+                "external_axis_prefix:=",
+                external_axis_prefix,
+                " ",
+                "arm_prefix:=",
+                arm_prefix,
             ]
         ),
         value_type=str,
@@ -186,8 +229,19 @@ def generate_launch_description():
     )
 
     # Robot controllers
+    controller_file_name = PythonExpression(
+        [
+            "'aico1_4_v2_controllers.yaml' if '",
+            external_axis_type,
+            "' == 'AICO1-4-V2' else 'aico1_4_v1_controllers.yaml'",
+        ]
+    )
     robot_controllers = PathJoinSubstitution(
-        [FindPackageShare("flexiv_bringup"), "config", "rizon_controllers.yaml"]
+        [
+            FindPackageShare("flexiv_bringup"),
+            "config",
+            controller_file_name,
+        ]
     )
 
     # Controller Manager
@@ -199,6 +253,7 @@ def generate_launch_description():
             ParameterFile(robot_controllers, allow_substs=True),
             {"robot_sn": robot_sn},
             {"rdk_control_mode": rdk_control_mode},
+            {"external_axis_prefix": external_axis_prefix},
         ],
         remappings=[("joint_states", "flexiv_rizon_arm/joint_states")],
         output="both",

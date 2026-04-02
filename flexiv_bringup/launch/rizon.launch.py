@@ -111,7 +111,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             robot_controller_param_name,
             default_value="rizon_arm_controller",
-            description="Robot controller to start. Available: rizon_arm_controller",
+            description="Robot controller to start. Available: rizon_arm_controller, streaming_position_controller",
         )
     )
 

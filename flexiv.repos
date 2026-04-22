@@ -1,0 +1,29 @@
+# ABI-locked source snapshot of ros2_control and ros2_controllers for the
+# Flexiv driver. These versions match the ABI that the prebuilt flexiv_rdk
+# v1.8 static archive was compiled against.
+#
+# Rationale:
+#   * ros2_control and ros2_controllers share a C++ ABI boundary via
+#     controller_interface. Mixing versions from different Jazzy snapshots
+#     causes SIGSEGV in controller on_activate() when controller_manager
+#     loads them.
+#   * packages.ros.org periodically purges older Jazzy snapshot .debs
+#     (e.g. the 20260124 snapshot is no longer available), so apt-pinning
+#     is not durable. Git tags are permanent, so we build from source.
+#   * Fast-DDS (fastrtps / fastcdr) is still apt-pinned separately, because
+#     libflexiv_rdk.<arch>.a statically references Fast-DDS symbols at
+#     specific ABI versions and Fast-DDS is too heavyweight to vendor here.
+#
+# Import:
+#   cd ${ISAAC_ROS_WS}
+#   vcs import src < src/flexiv_ros2/flexiv.repos
+repositories:
+  third_party/ros2_control:
+    type: git
+    url: https://github.com/ros-controls/ros2_control.git
+    version: 4.42.2
+  third_party/ros2_controllers:
+    type: git
+    url: https://github.com/ros-controls/ros2_controllers.git
+    version: 4.36.0
+

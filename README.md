@@ -54,7 +54,7 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    ```bash
    mkdir -p ~/flexiv_ros2_ws/src
    cd ~/flexiv_ros2_ws/src
-   git clone https://github.com/flexivrobotics/flexiv_ros2.git -b jazzy
+   git clone https://github.com/flexivrobotics/flexiv_ros2.git -b jazzy-v1
    ```
 
 4. Install dependencies:

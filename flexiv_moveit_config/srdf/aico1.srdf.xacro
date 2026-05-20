@@ -28,7 +28,7 @@
     </xacro:if>
     <xacro:if value="${'$(arg external_axis_type)' == 'aico1_4_v2'}">
         <virtual_joint name="virtual_joint" type="fixed" parent_frame="world"
-            child_link="${external_axis_prefix}aico1_4_v2_agv" />
+            child_link="${external_axis_prefix}aico1_4_v2_base_link" />
         <group name="${external_axis_prefix}aico1_4_v2_platform_${prefix}arm">
             <chain base_link="${external_axis_prefix}aico1_4_v2_base_link" tip_link="${prefix}flange" />
         </group>

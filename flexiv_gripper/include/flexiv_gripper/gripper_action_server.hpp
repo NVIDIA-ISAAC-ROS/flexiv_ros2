@@ -35,6 +35,16 @@ const int kDefaultStatePublishRate = 30;    // [Hz]
 const int kDefaultFeedbackPublishRate = 10; // [Hz]
 const double kDefaultVelocity = 0.1;        // [m/s]
 const double kDefaultMaxForce = 20;         // [N]
+// Tight tolerance used to short-circuit a Move() when the gripper is
+// already at the requested width.
+const double kGripperWidthTolerance = 2e-3;      // [m] (2 mm)
+// Position tolerance for the action result on a close command
+const double kReachedGoalTolerance = 5e-3;       // [m] (5 mm)
+// Position tolerance for the action result on an open command
+const double kOpenReachedGoalTolerance = 2e-2;   // [m] (20 mm)
+// Absolute force above which the gripper is considered to be holding an
+// object
+const double kStallForceThreshold = 0.5;         // [N]
 }
 
 namespace flexiv_gripper {
@@ -155,12 +165,37 @@ private:
     void ExecuteGripperCommand(const std::shared_ptr<GoalHandleGripperCommand>& goal_handle);
 
     /**
-     * @brief Execute the gripper command and return the result.
-     * @param[in] goal_handle The goal handle of the action.
-     * @param[in] command The RDK function to execute the gripper command.
+     * @brief Drive the GripperCommand action through completion. Dispatches
+     *        the non-blocking RDK Move(), blocks until motion finishes,
+     *        then populates the action result from a fresh gripper sample.
+     * @param[in] goal_handle  The goal handle of the action.
+     * @param[in] target_width Commanded gripper width in meters.
+     * @param[in] max_force    Maximum force the firmware may apply.
      */
     void ExecuteGripperCommandHelper(const std::shared_ptr<GoalHandleGripperCommand>& goal_handle,
-        const std::function<void()>& command);
+        double target_width, double max_force);
+
+    /**
+     * @brief Block until the RDK reports the gripper has finished moving,
+     *        stalled on an object, or the motion timeout elapses. The
+     *        Flexiv RDK's Move() is non-blocking; this provides the
+     *        synchronous "motion complete" semantics ROS 2 action clients
+     *        expect.
+     * @param[in] target_width Commanded gripper width in meters.
+     * @param[in] velocity     Commanded velocity in m/s; used to estimate
+     *                         the minimum time the move should take.
+     * @param[in] max_force    Upper bound on the force the firmware may
+     *                         apply. The effective stall threshold is
+     *                         ``min(kStallForceThreshold, max_force)``.
+     */
+    void WaitForGripperMotionComplete(double target_width, double velocity, double max_force);
+
+    /**
+     * @brief Resolve the effective max force for a GripperCommand goal.
+     *        Goals with ``max_effort <= 0`` fall back to
+     *        ``kDefaultMaxForce``.
+     */
+    static double EffectiveMaxForce(double command_max_effort);
 
     /**
      * @brief Execute the gripper command and return the result.

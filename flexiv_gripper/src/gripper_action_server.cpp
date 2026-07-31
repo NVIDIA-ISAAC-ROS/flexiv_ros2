@@ -225,7 +225,8 @@ void GripperActionServer::WaitForGripperMotionComplete(
     // exit paths.
     constexpr double kMinWindowSlackSec = 0.15;
 
-    const double stall_threshold = std::min(kStallForceThreshold, max_force);
+    const double stall_threshold = std::max(
+        kStallForceThreshold, kStallForceFraction * max_force);
     // Guard against divide-by-zero in the min-window calculation if a
     // caller dispatched with a non-positive velocity.
     const double effective_velocity = (velocity > 0.0) ? velocity : kDefaultVelocity;
@@ -356,7 +357,8 @@ void GripperActionServer::ExecuteGripperCommandHelper(
     const bool reached_target
         = std::abs(final_states.width - target_width) < reach_tolerance;
 
-    const double stall_threshold = std::min(kStallForceThreshold, max_force);
+    const double stall_threshold = std::max(
+        kStallForceThreshold, kStallForceFraction * max_force);
     const bool stalled = final_states.force >= stall_threshold;
 
     // At this point result->reached_goal means "dispatch did not throw".

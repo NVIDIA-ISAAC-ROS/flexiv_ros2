@@ -42,10 +42,14 @@ const double kGripperWidthTolerance = 2e-3;      // [m] (2 mm)
 const double kReachedGoalTolerance = 5e-3;       // [m] (5 mm)
 // Position tolerance for the action result on an open command
 const double kOpenReachedGoalTolerance = 2e-2;   // [m] (20 mm)
-// Absolute force above which the gripper is considered to be holding an
-// object
+// Minimum absolute force that can count as a stall / object contact [N].
 const double kStallForceThreshold = 0.5;         // [N]
-}
+// Fraction of commanded max_effort at which a close is considered stalled.
+// Using only kStallForceThreshold (0.5 N) aborts Move() before the gripper
+// can apply the requested grasp force (e.g. 80 N).
+const double kStallForceFraction = 0.8;
+
+}  // namespace
 
 namespace flexiv_gripper {
 

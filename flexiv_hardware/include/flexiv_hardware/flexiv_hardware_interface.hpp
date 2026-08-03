@@ -122,6 +122,10 @@ private:
     flexiv::rdk::RobotStates hw_flexiv_robot_states_;
     flexiv::rdk::RobotStates* hw_flexiv_robot_states_addr_ = &hw_flexiv_robot_states_;
 
+    // Desired/commanded values (tau_d, etc.) via Robot::actions() since RDK v1.9.
+    flexiv::rdk::RobotActions hw_flexiv_robot_actions_;
+    flexiv::rdk::RobotActions* hw_flexiv_robot_actions_addr_ = &hw_flexiv_robot_actions_;
+
     // GPIO commands and states
     std::vector<double> hw_commands_gpio_out_;
     std::vector<double> hw_states_gpio_in_;

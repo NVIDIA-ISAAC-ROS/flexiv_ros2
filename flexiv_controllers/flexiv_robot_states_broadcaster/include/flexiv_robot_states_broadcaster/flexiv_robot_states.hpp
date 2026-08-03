@@ -55,9 +55,10 @@ class FlexivRobotStates : public SemanticComponentInterface<flexiv_msgs::msg::Ro
 {
 public:
     FlexivRobotStates(const std::string& name)
-    : SemanticComponentInterface(name, 1)
+    : SemanticComponentInterface(name, 2)
     {
         interface_names_.emplace_back(name_ + "/" + state_interface_name_);
+        interface_names_.emplace_back(name_ + "/" + action_interface_name_);
     }
 
     virtual ~FlexivRobotStates() = default;
@@ -95,6 +96,25 @@ public:
             return false;
         }
 
+        const std::string flexiv_robot_actions_interface_name
+            = name_ + "/" + action_interface_name_;
+
+        auto flexiv_robot_actions_interface
+            = std::find_if(state_interfaces_.cbegin(), state_interfaces_.cend(),
+                [&flexiv_robot_actions_interface_name](const auto& state_interface) {
+                    return state_interface.get().get_name()
+                           == flexiv_robot_actions_interface_name;
+                });
+
+        if (flexiv_robot_actions_interface != state_interfaces_.end()) {
+            flexiv_robot_actions_ptr = bit_cast<flexiv::rdk::RobotActions*>(
+                (*flexiv_robot_actions_interface).get().get_optional().value());
+        } else {
+            RCLCPP_ERROR(
+                rclcpp::get_logger("FlexivRobotStates"), "Robot actions interface not found.");
+            return false;
+        }
+
         // Update timestamps
         message.tcp_pose.header.stamp = message.header.stamp;
         message.tcp_vel.header.stamp = message.header.stamp;
@@ -114,7 +134,7 @@ public:
         message.dq = toJointStateMsg(flexiv_robot_states_ptr->dq);
         message.dtheta = toJointStateMsg(flexiv_robot_states_ptr->dtheta);
         message.tau = toJointStateMsg(flexiv_robot_states_ptr->tau);
-        message.tau_des = toJointStateMsg(flexiv_robot_states_ptr->tau_des);
+        message.tau_des = toJointStateMsg(flexiv_robot_actions_ptr->tau_d);
         message.tau_dot = toJointStateMsg(flexiv_robot_states_ptr->tau_dot);
         message.tau_ext = toJointStateMsg(flexiv_robot_states_ptr->tau_ext);
         message.tau_interact = toJointStateMsg(flexiv_robot_states_ptr->tau_interact);
@@ -137,8 +157,10 @@ public:
 
 protected:
     flexiv::rdk::RobotStates* flexiv_robot_states_ptr;
+    flexiv::rdk::RobotActions* flexiv_robot_actions_ptr;
 
     const std::string state_interface_name_ {"flexiv_robot_states"};
+    const std::string action_interface_name_ {"flexiv_robot_actions"};
 
     // Convert std::vector to std::array
     std::array<double, 7> toJointStateMsg(const std::vector<double>& joint_values)

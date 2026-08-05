@@ -34,9 +34,22 @@ from pathlib import Path
 
 JOINT_NAMES = [f"joint{i}" for i in range(1, 8)] + ["link7_to_flange"]
 
-# Nominal kinematics URDF shipped with the RDK, relative to this script.
+# Nominal kinematics URDF bundled with flexiv_hardware.
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_RDK_TEMPLATE = _SCRIPT_DIR.parent / "rdk" / "resources" / "flexiv_Rizon4s_kinematics.urdf"
+_SOURCE_TEMPLATE = (
+    _SCRIPT_DIR.parent / "resources" / "flexiv_Rizon4s_kinematics.urdf"
+)
+
+
+def installed_template_urdf():
+    """Return the template from an installed ROS package, if available."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        package_share = Path(get_package_share_directory("flexiv_hardware"))
+    except (ImportError, LookupError):
+        return None
+    return package_share / "resources" / "flexiv_Rizon4s_kinematics.urdf"
 
 
 def float_list(value):
@@ -146,18 +159,17 @@ def find_template_urdf(args):
         return path
 
     candidates = [
-        # Preferred: RDK resources bundled alongside this script in the repo
-        _RDK_TEMPLATE,
-        # Installed flexiv_description (available after colcon build)
-        Path(f"/opt/ros/jazzy/share/flexiv_description/urdf/{args.robot_sn}.urdf"),
-        Path("/opt/ros/jazzy/share/flexiv_description/urdf/Rizon4s.urdf"),
+        # Running directly from the source tree.
+        _SOURCE_TEMPLATE,
+        # Running via `ros2 run` from an installed workspace.
+        installed_template_urdf(),
     ]
     for path in candidates:
-        if path.exists():
+        if path is not None and path.is_file():
             return path
     raise FileNotFoundError(
         "Could not find a template URDF. Pass --template-urdf explicitly, "
-        "or ensure the RDK submodule is initialised (git submodule update --init --recursive)."
+        "or rebuild and source the workspace so the flexiv_hardware resources are installed."
     )
 
 

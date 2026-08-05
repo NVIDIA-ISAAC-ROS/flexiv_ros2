@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="Rizon4s">
+  <xacro:include filename="../../flexiv_description/urdf/rizon4_joints_links.xacro"/>
+  <xacro:rizon4_joints_links
+    rizon_type="Rizon4s"
+    prefix=""
+    load_mounted_ft_sensor="false"
+    mesh_prefix_path="package://flexiv_description/"/>
+</robot>

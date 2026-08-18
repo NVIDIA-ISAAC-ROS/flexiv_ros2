@@ -58,6 +58,9 @@ echo "Applying source overrides into: ${SRC_DIR}"
 
 # --- list of overrides to apply ---
 apply_override "third_party/ros2_control/hardware_interface/src/lexical_casts.cpp"
+apply_override "third_party/ros2_controllers/joint_trajectory_controller/CMakeLists.txt"
+apply_override "third_party/ros2_controllers/joint_trajectory_controller/package.xml"
+apply_override "third_party/ros2_controllers/joint_trajectory_controller/include/joint_trajectory_controller/validate_jtc_parameters.hpp"
 # apply_override "third_party/<pkg>/path/to/another/file.cpp"
 
 echo "Done."

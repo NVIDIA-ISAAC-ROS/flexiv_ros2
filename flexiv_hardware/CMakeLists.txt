@@ -17,8 +17,20 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
-find_package(flexiv_rdk REQUIRED)
 find_package(flexiv_msgs REQUIRED)
+
+# Keep the RDK's private dependency prefix scoped to this package. In
+# particular, its Fast-CDR 1 headers must not replace ROS 2 Lyrical's native
+# Fast-CDR 2 headers while other workspace packages generate message support.
+set(FLEXIV_RDK_PREFIX "$ENV{FLEXIV_RDK_PREFIX}" CACHE PATH
+  "Private flexiv_rdk installation prefix")
+set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
+if(FLEXIV_RDK_PREFIX)
+  list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+endif()
+find_package(flexiv_rdk REQUIRED)
+set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
+unset(_flexiv_original_cmake_prefix_path)
 
 add_library(
   ${PROJECT_NAME}

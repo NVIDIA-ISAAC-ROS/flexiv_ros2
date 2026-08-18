@@ -14,6 +14,7 @@ For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flex
 | ---------------- | ------------------------------------------------------------- |
 | Ubuntu 22.04     | [Humble Hawksbill](https://docs.ros.org/en/humble/index.html) |
 | Ubuntu 24.04     | [Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html)     |
+| Ubuntu 24.04     | [Lyrical Luth](https://docs.ros.org/en/lyrical/index.html)     |
 
 ### Release Status
 
@@ -92,6 +93,83 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
 > source /opt/ros/jazzy/setup.bash
 > source ~/flexiv_ros2_ws/install/setup.bash
 > ```
+
+### ROS 2 Lyrical (NVIDIA branch)
+
+ROS 2 Lyrical support is maintained on
+`nvidia/lyrical-rdk-v1.9.2` in the NVIDIA Isaac ROS fork. Build every ROS
+package against Lyrical: do not install or source Jazzy Debian packages in a
+Lyrical environment.
+
+The RDK v1.9.2 generic archive uses Fast DDS 2 and Fast-CDR 1 internally,
+whereas Lyrical provides newer ABI-incompatible versions. The helper below
+builds the dependency revisions from the RDK manifest into a private prefix and
+keeps them out of the ROS workspace's global CMake search path. It does not
+install Debian packages or pin package versions.
+
+1. Clone the Lyrical branch and its submodules:
+
+   ```bash
+   mkdir -p ~/flexiv_ros2_ws/src
+   cd ~/flexiv_ros2_ws/src
+   git clone -b nvidia/lyrical-rdk-v1.9.2 \
+     https://github.com/NVIDIA-ISAAC-ROS/flexiv_ros2.git
+   cd flexiv_ros2
+   git submodule update --init --recursive
+   ```
+
+2. Import the ABI-compatible `ros2_control` sources and apply the Lyrical
+   source overrides:
+
+   ```bash
+   sudo apt-get install -y python3-vcstool
+   cd ~/flexiv_ros2_ws
+   vcs import src < src/flexiv_ros2/flexiv.repos
+   bash src/flexiv_ros2/scripts/apply_source_fixes.sh
+   ```
+
+3. Install the native, unversioned Lyrical packages required by this workflow,
+   then resolve the remaining dependencies with `rosdep`:
+
+   ```bash
+   sudo apt-get install -y \
+     ros-lyrical-rmw-cyclonedds-cpp \
+     ros-lyrical-ros2-control-cmake
+
+   cd ~/flexiv_ros2_ws
+   rosdep update
+   rosdep install \
+     --from-paths src/flexiv_ros2 src/third_party/ros2_control \
+       src/third_party/ros2_controllers \
+     --ignore-src --skip-keys "ros2_control_cmake" \
+     --rosdistro lyrical -r -y
+   ```
+
+4. Select Cyclone DDS for ROS traffic and build the RDK into its private
+   prefix:
+
+   ```bash
+   source /opt/ros/lyrical/setup.bash
+   export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+   export FLEXIV_RDK_PREFIX=~/rdk_install
+   export LD_LIBRARY_PATH=${FLEXIV_RDK_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+
+   bash ~/flexiv_ros2_ws/src/flexiv_ros2/scripts/build_and_install_rdk.sh \
+     "${FLEXIV_RDK_PREFIX}" "$(nproc)"
+   ```
+
+5. Build and source the workspace:
+
+   ```bash
+   cd ~/flexiv_ros2_ws
+   colcon build --symlink-install \
+     --allow-overriding hardware_interface controller_manager \
+       joint_state_broadcaster joint_trajectory_controller \
+     --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+     --packages-up-to-regex "flexiv_*" cartesian_motion_controller \
+       gpio_controller streaming_position_controller
+   source install/setup.bash
+   ```
 
 ## Usage
 

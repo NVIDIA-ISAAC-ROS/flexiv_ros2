@@ -80,6 +80,7 @@ CallbackReturn CartesianMotionController::on_configure(
     state_publisher_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
         "~/tcp_pose", rclcpp::SystemDefaultsQoS());
     realtime_state_publisher_ = std::make_unique<StatePublisher>(state_publisher_);
+    state_msg_.header.frame_id = "world";
 
     RCLCPP_INFO(get_node()->get_logger(), "Cartesian motion controller configured");
     return CallbackReturn::SUCCESS;
@@ -237,22 +238,18 @@ controller_interface::return_type CartesianMotionController::update(
         }
     }
 
-    if (realtime_state_publisher_ && realtime_state_publisher_->trylock()) {
-        auto& msg = realtime_state_publisher_->msg_;
-        msg.header.stamp = time;
-        msg.header.frame_id = "world";
-
+    if (realtime_state_publisher_) {
+        state_msg_.header.stamp = time;
         if (cartesian_pose_state_interfaces_.size() == kCartPoseSize) {
-            msg.pose.position.x = cartesian_pose_state_interfaces_[0].get().get_optional<double>().value_or(0.0);
-            msg.pose.position.y = cartesian_pose_state_interfaces_[1].get().get_optional<double>().value_or(0.0);
-            msg.pose.position.z = cartesian_pose_state_interfaces_[2].get().get_optional<double>().value_or(0.0);
-            msg.pose.orientation.w = cartesian_pose_state_interfaces_[3].get().get_optional<double>().value_or(1.0);
-            msg.pose.orientation.x = cartesian_pose_state_interfaces_[4].get().get_optional<double>().value_or(0.0);
-            msg.pose.orientation.y = cartesian_pose_state_interfaces_[5].get().get_optional<double>().value_or(0.0);
-            msg.pose.orientation.z = cartesian_pose_state_interfaces_[6].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.position.x = cartesian_pose_state_interfaces_[0].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.position.y = cartesian_pose_state_interfaces_[1].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.position.z = cartesian_pose_state_interfaces_[2].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.orientation.w = cartesian_pose_state_interfaces_[3].get().get_optional<double>().value_or(1.0);
+            state_msg_.pose.orientation.x = cartesian_pose_state_interfaces_[4].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.orientation.y = cartesian_pose_state_interfaces_[5].get().get_optional<double>().value_or(0.0);
+            state_msg_.pose.orientation.z = cartesian_pose_state_interfaces_[6].get().get_optional<double>().value_or(0.0);
         }
-
-        realtime_state_publisher_->unlockAndPublish();
+        (void)realtime_state_publisher_->try_publish(state_msg_);
     }
 
     return controller_interface::return_type::OK;

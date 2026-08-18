@@ -60,6 +60,7 @@ protected:
         flexiv_robot_states_publisher_;
     using StatePublisher = realtime_tools::RealtimePublisher<flexiv_msgs::msg::RobotStates>;
     std::shared_ptr<StatePublisher> realtime_flexiv_robot_states_publisher_;
+    flexiv_msgs::msg::RobotStates flexiv_robot_states_msg_;
 
     using PoseStampedPublisher = rclcpp::Publisher<geometry_msgs::msg::PoseStamped>;
     std::shared_ptr<PoseStampedPublisher> tcp_pose_publisher_;

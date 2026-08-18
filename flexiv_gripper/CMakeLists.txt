@@ -21,7 +21,18 @@ find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+
+# Scope the RDK's private dependencies to this package so they do not replace
+# ROS 2 Lyrical's native dependency versions in the rest of the workspace.
+set(FLEXIV_RDK_PREFIX "$ENV{FLEXIV_RDK_PREFIX}" CACHE PATH
+  "Private flexiv_rdk installation prefix")
+set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
+if(FLEXIV_RDK_PREFIX)
+  list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+endif()
 find_package(flexiv_rdk REQUIRED)
+set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
+unset(_flexiv_original_cmake_prefix_path)
 
 add_library(gripper_action_server
   SHARED

@@ -63,6 +63,7 @@ private:
     using StatePublisher = realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>;
     std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::PoseStamped>> state_publisher_;
     std::unique_ptr<StatePublisher> realtime_state_publisher_;
+    geometry_msgs::msg::PoseStamped state_msg_;
 
     static constexpr size_t kCartPoseSize = 7;
     static constexpr size_t kCartDoF = 6;

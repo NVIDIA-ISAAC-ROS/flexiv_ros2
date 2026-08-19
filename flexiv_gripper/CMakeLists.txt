@@ -22,17 +22,32 @@ find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
-# Scope the RDK's private dependencies to this package so they do not replace
-# ROS 2 Lyrical's native dependency versions in the rest of the workspace.
+# Use the symbol-isolated RDK wrapper on Lyrical. Jazzy continues to consume
+# the vendor's regular CMake package.
 set(FLEXIV_RDK_PREFIX "$ENV{FLEXIV_RDK_PREFIX}" CACHE PATH
   "Private flexiv_rdk installation prefix")
-set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
-if(FLEXIV_RDK_PREFIX)
-  list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+if("$ENV{ROS_DISTRO}" STREQUAL "lyrical")
+  set(_flexiv_rdk_wrapper
+    "${FLEXIV_RDK_PREFIX}/lib/libflexiv_rdk_lyrical.so")
+  if(NOT FLEXIV_RDK_PREFIX OR NOT EXISTS "${_flexiv_rdk_wrapper}")
+    message(FATAL_ERROR
+      "ROS 2 Lyrical requires the symbol-isolated RDK wrapper. Run "
+      "scripts/build_and_install_rdk.sh and export FLEXIV_RDK_PREFIX.")
+  endif()
+  add_library(flexiv_rdk_lyrical SHARED IMPORTED)
+  set_target_properties(flexiv_rdk_lyrical PROPERTIES
+    IMPORTED_LOCATION "${_flexiv_rdk_wrapper}")
+  set(FLEXIV_RDK_TARGET flexiv_rdk_lyrical)
+else()
+  set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
+  if(FLEXIV_RDK_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+  endif()
+  find_package(flexiv_rdk REQUIRED)
+  set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
+  unset(_flexiv_original_cmake_prefix_path)
+  set(FLEXIV_RDK_TARGET flexiv::flexiv_rdk)
 endif()
-find_package(flexiv_rdk REQUIRED)
-set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
-unset(_flexiv_original_cmake_prefix_path)
 
 add_library(gripper_action_server
   SHARED
@@ -43,7 +58,7 @@ target_include_directories(gripper_action_server PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../flexiv_hardware/rdk/include)
 
 target_link_libraries(gripper_action_server
-  flexiv::flexiv_rdk
+  ${FLEXIV_RDK_TARGET}
 )
 
 ament_target_dependencies(gripper_action_server

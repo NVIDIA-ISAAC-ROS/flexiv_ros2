@@ -19,18 +19,33 @@ find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(flexiv_msgs REQUIRED)
 
-# Keep the RDK's private dependency prefix scoped to this package. In
-# particular, its Fast-CDR 1 headers must not replace ROS 2 Lyrical's native
-# Fast-CDR 2 headers while other workspace packages generate message support.
+# Lyrical cannot load the RDK's Fast-CDR 1 and ROS's Fast-CDR 2 symbols into
+# the same ELF namespace. The helper installs an RDK wrapper whose private
+# dependencies are statically embedded and symbol-hidden.
 set(FLEXIV_RDK_PREFIX "$ENV{FLEXIV_RDK_PREFIX}" CACHE PATH
   "Private flexiv_rdk installation prefix")
-set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
-if(FLEXIV_RDK_PREFIX)
-  list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+if("$ENV{ROS_DISTRO}" STREQUAL "lyrical")
+  set(_flexiv_rdk_wrapper
+    "${FLEXIV_RDK_PREFIX}/lib/libflexiv_rdk_lyrical.so")
+  if(NOT FLEXIV_RDK_PREFIX OR NOT EXISTS "${_flexiv_rdk_wrapper}")
+    message(FATAL_ERROR
+      "ROS 2 Lyrical requires the symbol-isolated RDK wrapper. Run "
+      "scripts/build_and_install_rdk.sh and export FLEXIV_RDK_PREFIX.")
+  endif()
+  add_library(flexiv_rdk_lyrical SHARED IMPORTED)
+  set_target_properties(flexiv_rdk_lyrical PROPERTIES
+    IMPORTED_LOCATION "${_flexiv_rdk_wrapper}")
+  set(FLEXIV_RDK_TARGET flexiv_rdk_lyrical)
+else()
+  set(_flexiv_original_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
+  if(FLEXIV_RDK_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${FLEXIV_RDK_PREFIX}")
+  endif()
+  find_package(flexiv_rdk REQUIRED)
+  set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
+  unset(_flexiv_original_cmake_prefix_path)
+  set(FLEXIV_RDK_TARGET flexiv::flexiv_rdk)
 endif()
-find_package(flexiv_rdk REQUIRED)
-set(CMAKE_PREFIX_PATH "${_flexiv_original_cmake_prefix_path}")
-unset(_flexiv_original_cmake_prefix_path)
 
 add_library(
   ${PROJECT_NAME}
@@ -46,7 +61,7 @@ target_include_directories(
 )
 
 target_link_libraries(${PROJECT_NAME}
-  flexiv::flexiv_rdk
+  ${FLEXIV_RDK_TARGET}
 )
 
 # Link ROS packages

@@ -103,9 +103,11 @@ Lyrical environment.
 
 The RDK v1.9.2 generic archive uses Fast DDS 2 and Fast-CDR 1 internally,
 whereas Lyrical provides newer ABI-incompatible versions. The helper below
-builds the dependency revisions from the RDK manifest into a private prefix and
-keeps them out of the ROS workspace's global CMake search path. It does not
-install Debian packages or pin package versions.
+builds the dependency revisions from the RDK manifest as private static
+libraries, combines them with the generic RDK archive in a symbol-isolated
+wrapper, and exports only the public Flexiv RDK API. Lyrical can therefore use
+its native ROS middleware without either Fast DDS stack replacing the other's
+symbols. The helper does not install or pin Debian package versions.
 
 1. Clone the Lyrical branch and its submodules:
 
@@ -128,13 +130,11 @@ install Debian packages or pin package versions.
    bash src/flexiv_ros2/scripts/apply_source_fixes.sh
    ```
 
-3. Install the native, unversioned Lyrical packages required by this workflow,
-   then resolve the remaining dependencies with `rosdep`:
+3. Install the native, unversioned Lyrical build package required by this
+   workflow, then resolve the remaining dependencies with `rosdep`:
 
    ```bash
-   sudo apt-get install -y \
-     ros-lyrical-rmw-cyclonedds-cpp \
-     ros-lyrical-ros2-control-cmake
+   sudo apt-get install -y ros-lyrical-ros2-control-cmake
 
    cd ~/flexiv_ros2_ws
    rosdep update
@@ -145,18 +145,19 @@ install Debian packages or pin package versions.
      --rosdistro lyrical -r -y
    ```
 
-4. Select Cyclone DDS for ROS traffic and build the RDK into its private
-   prefix:
+4. Build the RDK and its symbol-isolated runtime wrapper:
 
    ```bash
    source /opt/ros/lyrical/setup.bash
-   export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
    export FLEXIV_RDK_PREFIX=~/rdk_install
-   export LD_LIBRARY_PATH=${FLEXIV_RDK_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
    bash ~/flexiv_ros2_ws/src/flexiv_ros2/scripts/build_and_install_rdk.sh \
      "${FLEXIV_RDK_PREFIX}" "$(nproc)"
    ```
+
+   Do not add the wrapper's private dependency directory to
+   `CMAKE_PREFIX_PATH` or `LD_LIBRARY_PATH`. The ROS packages link only to the
+   public wrapper, which records the required runtime path automatically.
 
 5. Build and source the workspace:
 

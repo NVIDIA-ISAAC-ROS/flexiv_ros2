@@ -1,0 +1,13 @@
+FLEXIV_RDK_LYRICAL_1.9 {
+  global:
+    _ZN6flexiv3rdk*;
+    _ZNK6flexiv3rdk*;
+    _ZNO6flexiv3rdk*;
+    _ZTI*6flexiv3rdk*;
+    _ZTS*6flexiv3rdk*;
+    _ZTV*6flexiv3rdk*;
+    _ZTT*6flexiv3rdk*;
+    _ZTC*6flexiv3rdk*;
+  local:
+    *;
+};

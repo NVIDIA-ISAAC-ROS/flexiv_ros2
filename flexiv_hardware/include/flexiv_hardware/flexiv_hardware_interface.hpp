@@ -61,6 +61,12 @@ constexpr size_t kCartPoseSize = 7;
 /** Cartesian space degrees of freedom: [Fx, Fy, Fz, Mx, My, Mz] */
 constexpr size_t kCartDoF = 6;
 
+// Zeroing the force/torque sensor contends with other RDK clients during
+// activation; flexiv_gripper's Gripper::Init alone holds the robot for about ten
+// seconds. Retry across that window rather than failing activation.
+constexpr int kZeroFTSensorMaxAttempts = 8;
+constexpr int kZeroFTSensorRetryDelayMs = 2000;
+
 class FlexivHardwareInterface : public hardware_interface::SystemInterface
 {
 public:

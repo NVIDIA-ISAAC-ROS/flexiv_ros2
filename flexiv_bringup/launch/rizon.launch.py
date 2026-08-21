@@ -319,6 +319,17 @@ def generate_launch_description():
         condition=UnlessCondition(use_fake_hardware),
     )
 
+    # Delay the gripper until the hardware interface is active. flexiv_gripper
+    # opens its own RDK connection and Gripper::Init holds the robot for about
+    # ten seconds; starting it in parallel with ros2_control_node makes the
+    # hardware interface's own RDK calls fail during activation.
+    delay_gripper_after_joint_state_broadcaster = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[load_gripper_launch],
+        )
+    )
+
     # Delay start of robot_controller after `joint_state_broadcaster`
     delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = (
         RegisterEventHandler(
@@ -343,9 +354,9 @@ def generate_launch_description():
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         flexiv_robot_states_broadcaster_spawner,
-        load_gripper_launch,
         gpio_controller_spawner,
         cartesian_motion_controller_spawner,
+        delay_gripper_after_joint_state_broadcaster,
         delay_robot_controller_spawner_after_joint_state_broadcaster_spawner,
         delay_rviz_after_robot_controller_spawner,
     ]

@@ -61,11 +61,16 @@ constexpr size_t kCartPoseSize = 7;
 /** Cartesian space degrees of freedom: [Fx, Fy, Fz, Mx, My, Mz] */
 constexpr size_t kCartDoF = 6;
 
-// Zeroing the force/torque sensor contends with other RDK clients during
-// activation; flexiv_gripper's Gripper::Init alone holds the robot for about ten
-// seconds. Retry across that window rather than failing activation.
-constexpr int kZeroFTSensorMaxAttempts = 8;
-constexpr int kZeroFTSensorRetryDelayMs = 2000;
+// on_activate() runs on the controller_manager's executor thread, so anything
+// slow here makes /controller_manager services unavailable for that long. Keep
+// the force/torque zeroing retry budget small: the launch files order other RDK
+// clients after activation, so a retry covers a brief race, not a ten-second
+// gripper init.
+constexpr int kZeroFTSensorMaxAttempts = 3;
+constexpr int kZeroFTSensorRetryDelayMs = 500;
+// Upper bound on the ZeroFTSensor primitive, so a primitive that never reports
+// termination cannot wedge activation.
+constexpr int kZeroFTSensorPrimitiveTimeoutMs = 10000;
 
 class FlexivHardwareInterface : public hardware_interface::SystemInterface
 {

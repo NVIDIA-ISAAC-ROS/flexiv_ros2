@@ -376,9 +376,15 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
                 robot_->SwitchMode(flexiv::rdk::Mode::NRT_PRIMITIVE_EXECUTION);
                 robot_->ExecutePrimitive("ZeroFTSensor", std::map<std::string, flexiv::rdk::FlexivDataTypes>{});
 
-                // Wait for primitive to finish
+                // Wait for primitive to finish, bounded so a primitive that never
+                // terminates cannot hold the executor thread indefinitely.
+                int waited_ms = 0;
                 while (!std::get<int>(robot_->primitive_states()["terminated"])) {
+                    if (waited_ms >= kZeroFTSensorPrimitiveTimeoutMs) {
+                        throw std::runtime_error("ZeroFTSensor primitive did not terminate");
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    waited_ms += 100;
                 }
                 sensor_zeroed = true;
                 RCLCPP_INFO(getLogger(), "Sensor zeroing complete");

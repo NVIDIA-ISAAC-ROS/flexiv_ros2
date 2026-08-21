@@ -416,9 +416,9 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
                 "disabled; the driver continues in its joint mode.", zeroing_error.c_str());
             runtime_cartesian_switching_ = false;
             try {
-                robot_->SwitchMode(rdk_control_mode_);
+                robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
             } catch (const std::exception& e) {
-                RCLCPP_FATAL(getLogger(), "Failed to restore the joint control mode");
+                RCLCPP_FATAL(getLogger(), "Failed to return the robot to IDLE");
                 RCLCPP_FATAL(getLogger(), e.what());
                 return hardware_interface::CallbackReturn::ERROR;
             }
@@ -433,10 +433,12 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
             cartesian_mode_active_ = true;
             RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
         } else {
-            // Hand the robot back to the joint mode the trajectory controller
-            // needs. Cartesian mode is entered later, by
-            // perform_command_mode_switch(), when its controller is activated.
-            robot_->SwitchMode(rdk_control_mode_);
+            // Leave the robot IDLE, which is how activation ends when no zeroing
+            // runs. Other RDK clients need it: flexiv_gripper's Tool::Switch
+            // fails with "Robot is not in IDLE mode" against any control mode.
+            // perform_command_mode_switch() sets the control mode when the first
+            // controller is activated.
+            robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
             RCLCPP_INFO(getLogger(),
                 "Cartesian mode prepared; runtime switching to RT_CARTESIAN_MOTION_FORCE "
                 "is enabled");

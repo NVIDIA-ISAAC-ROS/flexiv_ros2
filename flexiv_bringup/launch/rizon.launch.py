@@ -3,6 +3,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     RegisterEventHandler,
+    TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
@@ -330,12 +331,18 @@ def generate_launch_description():
         )
     )
 
-    # Delay start of robot_controller after `joint_state_broadcaster`
+    # Delay start of robot_controller after `joint_state_broadcaster`. Activating
+    # it takes the robot out of IDLE, and flexiv_gripper's Tool::Switch only
+    # works while the robot is IDLE, so leave the gripper time to finish first.
+    # The manipulation driver launch uses the same delay for the same reason.
     delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = (
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=joint_state_broadcaster_spawner,
-                on_exit=[robot_controller_spawner],
+                on_exit=[TimerAction(
+                    period=15.0,
+                    actions=[robot_controller_spawner],
+                )],
             )
         )
     )

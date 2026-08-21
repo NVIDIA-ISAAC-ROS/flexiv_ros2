@@ -144,6 +144,11 @@ private:
     bool torque_controller_running_;
     bool cartesian_motion_controller_running_;
     bool cartesian_mode_active_;
+    // When true, the driver starts in rdk_control_mode_ (a joint mode) but is
+    // prepared to enter RT_CARTESIAN_MOTION_FORCE later, when a controller
+    // claiming the tcp/cartesian_pose_* interfaces is activated. Set from the
+    // "runtime_cartesian_switching" hardware parameter.
+    bool runtime_cartesian_switching_;
     std::array<double, kCartPoseSize> init_tcp_pose_;
 
     bool isCartesianCommandValid() const;

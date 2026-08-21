@@ -5,6 +5,7 @@
     prefix
     robot_sn
     rdk_control_mode
+    runtime_cartesian_switching:=false
     use_fake_hardware:=false
     fake_sensor_commands:=false
     ">
@@ -21,6 +22,7 @@
           <param name="robot_sn">${robot_sn}</param>
           <param name="prefix">${prefix}</param>
           <param name="rdk_control_mode">${rdk_control_mode}</param>
+          <param name="runtime_cartesian_switching">${runtime_cartesian_switching}</param>
         </xacro:unless>
       </hardware>
 

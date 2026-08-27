@@ -73,6 +73,7 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
     torque_controller_running_ = false;
     cartesian_motion_controller_running_ = false;
     cartesian_mode_active_ = false;
+    runtime_cartesian_switching_ = false;
     controllers_initialized_ = false;
 
     hw_commands_cartesian_pose_.fill(std::numeric_limits<double>::quiet_NaN());
@@ -170,6 +171,21 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
     } catch (const std::out_of_range& ex) {
         RCLCPP_FATAL(getLogger(), "Parameter 'rdk_control_mode' not set");
         return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    // Optional. Lets a driver started in a joint mode hand command authority to a
+    // Cartesian controller at runtime, for workflows that plan joint trajectories
+    // and then run a task-space policy without restarting the driver.
+    runtime_cartesian_switching_ = false;
+    if (info_.hardware_parameters.count("runtime_cartesian_switching") > 0) {
+        const std::string value
+            = info_.hardware_parameters.at("runtime_cartesian_switching");
+        runtime_cartesian_switching_ = (value == "true" || value == "True" || value == "1");
+    }
+    if (runtime_cartesian_switching_
+        && rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        // Already Cartesian for the whole session; nothing to switch into later.
+        runtime_cartesian_switching_ = false;
     }
 
     try {
@@ -332,32 +348,101 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
 
     RCLCPP_INFO(getLogger(), "System successfully started!");
 
-    // Switch to Cartesian mode early (before RT loop) to avoid blocking 1kHz control
-    if (rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
-        // Zero force-torque sensor
+    // Cartesian control is prepared here, at activation, before the 1 kHz RT loop
+    // is running. Zeroing the force/torque sensor executes a primitive that takes
+    // seconds, so it must never run from perform_command_mode_switch().
+    //
+    // Two ways to reach this block:
+    //   * rdk_control_mode is cartesian_motion_force -- the driver is Cartesian
+    //     for its whole lifetime and enters the mode now.
+    //   * runtime_cartesian_switching is true -- the driver runs a joint mode for
+    //     trajectory execution and only borrows Cartesian mode later, when a
+    //     controller claiming the tcp/cartesian_pose_* interfaces is activated.
+    //     Preparation still happens now, while the robot is parked and holding
+    //     nothing, which is the only point at which zeroing the sensor is valid.
+    const bool cartesian_from_start
+        = (rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+    if (cartesian_from_start || runtime_cartesian_switching_) {
+        // Zero force-torque sensor. Other RDK clients contend for the robot at
+        // activation -- flexiv_gripper's Gripper::Init takes about ten seconds and
+        // makes SwitchMode fail while it is in flight -- so retry instead of
+        // giving up on the first refusal.
         RCLCPP_WARN(getLogger(),
             "Zeroing force/torque sensor. Make sure nothing is in contact with the robot.");
-        try {
-            robot_->SwitchMode(flexiv::rdk::Mode::NRT_PRIMITIVE_EXECUTION);
-            robot_->ExecutePrimitive("ZeroFTSensor", std::map<std::string, flexiv::rdk::FlexivDataTypes>{});
-            
-            // Wait for primitive to finish
-            while (!std::get<int>(robot_->primitive_states()["terminated"])) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        bool sensor_zeroed = false;
+        std::string zeroing_error;
+        for (int attempt = 1; attempt <= kZeroFTSensorMaxAttempts && !sensor_zeroed; ++attempt) {
+            try {
+                robot_->SwitchMode(flexiv::rdk::Mode::NRT_PRIMITIVE_EXECUTION);
+                robot_->ExecutePrimitive("ZeroFTSensor", std::map<std::string, flexiv::rdk::FlexivDataTypes>{});
+
+                // Wait for primitive to finish, bounded so a primitive that never
+                // terminates cannot hold the executor thread indefinitely.
+                int waited_ms = 0;
+                while (!std::get<int>(robot_->primitive_states()["terminated"])) {
+                    if (waited_ms >= kZeroFTSensorPrimitiveTimeoutMs) {
+                        throw std::runtime_error("ZeroFTSensor primitive did not terminate");
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    waited_ms += 100;
+                }
+                sensor_zeroed = true;
+                RCLCPP_INFO(getLogger(), "Sensor zeroing complete");
+            } catch (const std::exception& e) {
+                zeroing_error = e.what();
+                RCLCPP_WARN(getLogger(), "Force/torque sensor zeroing attempt %d of %d failed: %s",
+                    attempt, kZeroFTSensorMaxAttempts, zeroing_error.c_str());
+                if (attempt < kZeroFTSensorMaxAttempts) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(kZeroFTSensorRetryDelayMs));
+                }
             }
-            RCLCPP_INFO(getLogger(), "Sensor zeroing complete");
-        } catch (const std::exception& e) {
-            RCLCPP_FATAL(getLogger(), "Failed to zero force/torque sensor");
-            RCLCPP_FATAL(getLogger(), e.what());
-            return hardware_interface::CallbackReturn::ERROR;
+        }
+
+        if (!sensor_zeroed) {
+            if (cartesian_from_start) {
+                // Cartesian is the only mode this driver has; there is nothing to
+                // fall back to.
+                RCLCPP_FATAL(getLogger(), "Failed to zero force/torque sensor");
+                RCLCPP_FATAL(getLogger(), zeroing_error.c_str());
+                return hardware_interface::CallbackReturn::ERROR;
+            }
+            // Joint control is unaffected, so come up anyway and only give up the
+            // Cartesian handover. Clearing the flag makes
+            // perform_command_mode_switch() refuse the switch later rather than
+            // command Cartesian against a sensor that was never zeroed.
+            RCLCPP_ERROR(getLogger(),
+                "Failed to zero force/torque sensor: %s. Runtime Cartesian switching is "
+                "disabled; the driver continues in its joint mode.", zeroing_error.c_str());
+            runtime_cartesian_switching_ = false;
+            try {
+                robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
+            } catch (const std::exception& e) {
+                RCLCPP_FATAL(getLogger(), "Failed to return the robot to IDLE");
+                RCLCPP_FATAL(getLogger(), e.what());
+                return hardware_interface::CallbackReturn::ERROR;
+            }
+            return hardware_interface::CallbackReturn::SUCCESS;
         }
 
         init_tcp_pose_ = robot_->states().tcp_pose;
-        robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
-        robot_->SetForceControlAxis(
-            std::array<bool, kCartDoF>{false, false, false, false, false, false});
-        cartesian_mode_active_ = true;
-        RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
+        if (cartesian_from_start) {
+            robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+            robot_->SetForceControlAxis(
+                std::array<bool, kCartDoF>{false, false, false, false, false, false});
+            cartesian_mode_active_ = true;
+            RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
+        } else {
+            // Leave the robot IDLE, which is how activation ends when no zeroing
+            // runs. Other RDK clients need it: flexiv_gripper's Tool::Switch
+            // fails with "Robot is not in IDLE mode" against any control mode.
+            // perform_command_mode_switch() sets the control mode when the first
+            // controller is activated.
+            robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
+            RCLCPP_INFO(getLogger(),
+                "Cartesian mode prepared; runtime switching to RT_CARTESIAN_MOTION_FORCE "
+                "is enabled");
+        }
         RCLCPP_INFO(getLogger(), "Initial TCP pose: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
             init_tcp_pose_[0], init_tcp_pose_[1], init_tcp_pose_[2],
             init_tcp_pose_[3], init_tcp_pose_[4], init_tcp_pose_[5], init_tcp_pose_[6]);
@@ -679,6 +764,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
                && std::find(stop_modes_.begin(), stop_modes_.end(), StoppingInterface::STOP_CARTESIAN)
                       != stop_modes_.end()) {
         cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
         robot_->Stop();
     }
 
@@ -688,6 +775,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         velocity_controller_running_ = false;
         torque_controller_running_ = false;
         cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints before user commands arrives
         std::fill(hw_commands_joint_positions_.begin(), hw_commands_joint_positions_.end(),
@@ -704,6 +793,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         position_controller_running_ = false;
         torque_controller_running_ = false;
         cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints before user commands arrives
         std::fill(hw_commands_joint_velocities_.begin(), hw_commands_joint_velocities_.end(),
@@ -720,6 +811,8 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         position_controller_running_ = false;
         velocity_controller_running_ = false;
         cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints when starting joint torque controller before user
         // commands arrives
@@ -742,6 +835,29 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         hw_commands_cartesian_wrench_.fill(0.0);
         hw_commands_cartesian_velocity_.fill(0.0);
         hw_commands_cartesian_acceleration_.fill(0.0);
+
+        // Enter Cartesian mode if the driver was started in a joint mode. Without
+        // this, write() drops every Cartesian command, because it requires both
+        // cartesian_mode_active_ and robot_->mode() == RT_CARTESIAN_MOTION_FORCE.
+        // The joint branches above switch modes here in the same way; the RDK
+        // transition blocks this update cycle, which shows up as a single missed
+        // deadline on the 1 kHz loop at the moment of the switch.
+        if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+            if (!runtime_cartesian_switching_) {
+                RCLCPP_ERROR(getLogger(),
+                    "Cartesian controller activated but the hardware was started in a joint "
+                    "mode without runtime_cartesian_switching=true. Refusing to switch: the "
+                    "force/torque sensor has not been zeroed for Cartesian control.");
+                start_modes_.clear();
+                stop_modes_.clear();
+                return hardware_interface::return_type::ERROR;
+            }
+            robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+            robot_->SetForceControlAxis(
+                std::array<bool, kCartDoF>{false, false, false, false, false, false});
+            RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
+        }
+        cartesian_mode_active_ = true;
 
         RCLCPP_INFO(getLogger(), "Cartesian motion controller activated");
         RCLCPP_INFO(getLogger(), "Initial TCP pose: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",

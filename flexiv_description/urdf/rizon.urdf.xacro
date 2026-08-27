@@ -11,6 +11,7 @@
   <xacro:arg name="arm_prefix" default="" />
   <xacro:arg name="robot_sn" default="" />
   <xacro:arg name="rdk_control_mode" default="joint_position" />
+  <xacro:arg name="runtime_cartesian_switching" default="false" />
   <xacro:arg name="load_gripper" default="false" />
   <xacro:arg name="gripper_name" default="Flexiv-GN01" />
   <xacro:arg name="load_mounted_ft_sensor" default="false" />
@@ -22,6 +23,7 @@
     arm_prefix="$(arg arm_prefix)"
     robot_sn="$(arg robot_sn)"
     rdk_control_mode="$(arg rdk_control_mode)"
+    runtime_cartesian_switching="$(arg runtime_cartesian_switching)"
     load_gripper="$(arg load_gripper)"
     gripper_name="$(arg gripper_name)"
     use_fake_hardware="$(arg use_fake_hardware)"

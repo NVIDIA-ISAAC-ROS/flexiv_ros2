@@ -3,6 +3,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     RegisterEventHandler,
+    TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
@@ -29,6 +30,7 @@ def generate_launch_description():
     use_fake_hardware_param_name = "use_fake_hardware"
     fake_sensor_commands_param_name = "fake_sensor_commands"
     robot_controller_param_name = "robot_controller"
+    runtime_cartesian_switching_param_name = "runtime_cartesian_switching"
 
     # Declare arguments
     declared_arguments = []
@@ -115,6 +117,19 @@ def generate_launch_description():
         )
     )
 
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            runtime_cartesian_switching_param_name,
+            default_value="false",
+            description=(
+                "Prepare Cartesian control at startup so cartesian_motion_controller can take "
+                "command authority at runtime, and load it inactive alongside the joint "
+                "controller. Leave false for joint-only setups."
+            ),
+            choices=["true", "false"],
+        )
+    )
+
     # Initialize Arguments
     rizon_type = LaunchConfiguration(rizon_type_param_name)
     robot_sn = LaunchConfiguration(robot_sn_param_name)
@@ -126,6 +141,9 @@ def generate_launch_description():
     use_fake_hardware = LaunchConfiguration(use_fake_hardware_param_name)
     fake_sensor_commands = LaunchConfiguration(fake_sensor_commands_param_name)
     robot_controller = LaunchConfiguration(robot_controller_param_name)
+    runtime_cartesian_switching = LaunchConfiguration(
+        runtime_cartesian_switching_param_name
+    )
 
     # Get URDF via xacro
     flexiv_urdf_xacro = PathJoinSubstitution(
@@ -163,6 +181,9 @@ def generate_launch_description():
                 " ",
                 "fake_sensor_commands:=",
                 fake_sensor_commands,
+                " ",
+                "runtime_cartesian_switching:=",
+                runtime_cartesian_switching,
             ]
         ),
         value_type=str,
@@ -235,6 +256,22 @@ def generate_launch_description():
         arguments=[robot_controller, "--controller-manager", "/controller_manager"],
     )
 
+    # Load the Cartesian controller inactive so it can take command authority from
+    # the joint controller at runtime. Only meaningful when the hardware was started
+    # with runtime_cartesian_switching:=true, which prepares the Cartesian mode.
+    cartesian_motion_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "cartesian_motion_controller",
+            "--controller-manager",
+            "/controller_manager",
+            "--inactive",
+        ],
+        parameters=[{"robot_sn": robot_sn}],
+        condition=IfCondition(runtime_cartesian_switching),
+    )
+
     # Run joint state broadcaster
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
@@ -283,12 +320,29 @@ def generate_launch_description():
         condition=UnlessCondition(use_fake_hardware),
     )
 
-    # Delay start of robot_controller after `joint_state_broadcaster`
+    # Delay the gripper until the hardware interface is active. flexiv_gripper
+    # opens its own RDK connection and Gripper::Init holds the robot for about
+    # ten seconds; starting it in parallel with ros2_control_node makes the
+    # hardware interface's own RDK calls fail during activation.
+    delay_gripper_after_joint_state_broadcaster = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[load_gripper_launch],
+        )
+    )
+
+    # Delay start of robot_controller after `joint_state_broadcaster`. Activating
+    # it takes the robot out of IDLE, and flexiv_gripper's Tool::Switch only
+    # works while the robot is IDLE, so leave the gripper time to finish first.
+    # The manipulation driver launch uses the same delay for the same reason.
     delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = (
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=joint_state_broadcaster_spawner,
-                on_exit=[robot_controller_spawner],
+                on_exit=[TimerAction(
+                    period=15.0,
+                    actions=[robot_controller_spawner],
+                )],
             )
         )
     )
@@ -307,8 +361,9 @@ def generate_launch_description():
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         flexiv_robot_states_broadcaster_spawner,
-        load_gripper_launch,
         gpio_controller_spawner,
+        cartesian_motion_controller_spawner,
+        delay_gripper_after_joint_state_broadcaster,
         delay_robot_controller_spawner_after_joint_state_broadcaster_spawner,
         delay_rviz_after_robot_controller_spawner,
     ]

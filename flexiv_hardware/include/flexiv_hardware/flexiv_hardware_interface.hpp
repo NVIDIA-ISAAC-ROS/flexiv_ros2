@@ -61,6 +61,17 @@ constexpr size_t kCartPoseSize = 7;
 /** Cartesian space degrees of freedom: [Fx, Fy, Fz, Mx, My, Mz] */
 constexpr size_t kCartDoF = 6;
 
+// on_activate() runs on the controller_manager's executor thread, so anything
+// slow here makes /controller_manager services unavailable for that long. Keep
+// the force/torque zeroing retry budget small: the launch files order other RDK
+// clients after activation, so a retry covers a brief race, not a ten-second
+// gripper init.
+constexpr int kZeroFTSensorMaxAttempts = 3;
+constexpr int kZeroFTSensorRetryDelayMs = 500;
+// Upper bound on the ZeroFTSensor primitive, so a primitive that never reports
+// termination cannot wedge activation.
+constexpr int kZeroFTSensorPrimitiveTimeoutMs = 10000;
+
 class FlexivHardwareInterface : public hardware_interface::SystemInterface
 {
 public:
@@ -144,6 +155,11 @@ private:
     bool torque_controller_running_;
     bool cartesian_motion_controller_running_;
     bool cartesian_mode_active_;
+    // When true, the driver starts in rdk_control_mode_ (a joint mode) but is
+    // prepared to enter RT_CARTESIAN_MOTION_FORCE later, when a controller
+    // claiming the tcp/cartesian_pose_* interfaces is activated. Set from the
+    // "runtime_cartesian_switching" hardware parameter.
+    bool runtime_cartesian_switching_;
     std::array<double, kCartPoseSize> init_tcp_pose_;
 
     bool isCartesianCommandValid() const;

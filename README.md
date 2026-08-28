@@ -14,19 +14,20 @@ For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flex
 | ---------------- | ------------------------------------------------------------- |
 | Ubuntu 22.04     | [Humble Hawksbill](https://docs.ros.org/en/humble/index.html) |
 | Ubuntu 24.04     | [Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html)     |
+| Ubuntu 26.04     | [Lyrical Luth](https://docs.ros.org/en/lyrical/index.html)     |
 
 ### Release Status
 
-| **ROS 2 Distro**   | Humble                                                              | Jazzy                                                 |
-| ------------------ | ------------------------------------------------------------------- | ----------------------------------------------------- |
-| **Branch**         | [humble-v1](https://github.com/flexivrobotics/flexiv_ros2/tree/humble-v1) | [jazzy-v1](https://github.com/flexivrobotics/flexiv_ros2/tree/jazzy-v1) |
-| **Release Status** | [![Humble Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml/badge.svg?branch=humble)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml) | [![Jazzy Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml/badge.svg?branch=jazzy)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml) |
+| **ROS 2 Distro**   | Humble                                                              | Jazzy                                                 | Lyrical                                               |
+| ------------------ | ------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
+| **Branch**         | [humble-v1](https://github.com/flexivrobotics/flexiv_ros2/tree/humble-v1) | [jazzy-v1](https://github.com/flexivrobotics/flexiv_ros2/tree/jazzy-v1) | [lyrical-v1](https://github.com/flexivrobotics/flexiv_ros2/tree/lyrical-v1) |
+| **Release Status** | [![Humble Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml/badge.svg?branch=humble)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/humble-binary-build.yml) | [![Jazzy Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml/badge.svg?branch=jazzy)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/jazzy-binary-build.yml) | [![Lyrical Binary Build](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/lyrical-binary-build.yml/badge.svg?branch=lyrical)](https://github.com/flexivrobotics/flexiv_ros2/actions/workflows/lyrical-binary-build.yml) |
 
 ## Getting Started
 
-This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.04). Other versions of Ubuntu and ROS 2 may work, but are not officially supported.
+This project was developed for ROS 2 Humble (Ubuntu 22.04), Jazzy (Ubuntu 24.04) and Lyrical (Ubuntu 26.04). Other versions of Ubuntu and ROS 2 may work, but are not officially supported.
 
-1. Install [ROS 2 Jazzy via Debian Packages](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debians.html)
+1. Install [ROS 2 Lyrical via Debian Packages](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html)
 
 2. Install `colcon` and additional ROS packages:
 
@@ -35,18 +36,20 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    python3-colcon-common-extensions \
    libeigen3-dev \
    wget \
-   ros-jazzy-xacro \
-   ros-jazzy-tinyxml2-vendor \
-   ros-jazzy-ros2-control \
-   ros-jazzy-realtime-tools \
-   ros-jazzy-control-toolbox \
-   ros-jazzy-moveit \
-   ros-jazzy-ros2-controllers \
-   ros-jazzy-test-msgs \
-   ros-jazzy-joint-state-publisher \
-   ros-jazzy-joint-state-publisher-gui \
-   ros-jazzy-robot-state-publisher \
-   ros-jazzy-rviz2
+   ros-lyrical-xacro \
+   ros-lyrical-tinyxml2-vendor \
+   ros-lyrical-ros2-control \
+   ros-lyrical-realtime-tools \
+   ros-lyrical-control-toolbox \
+   ros-lyrical-moveit \
+   ros-lyrical-ros2-controllers \
+   ros-lyrical-test-msgs \
+   ros-lyrical-joint-state-publisher \
+   ros-lyrical-joint-state-publisher-gui \
+   ros-lyrical-robot-state-publisher \
+   ros-lyrical-rviz2 \
+   ros-lyrical-generate-parameter-library \
+   ros-lyrical-warehouse-ros-sqlite
    ```
 
 3. Setup workspace:
@@ -54,25 +57,24 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    ```bash
    mkdir -p ~/flexiv_ros2_ws/src
    cd ~/flexiv_ros2_ws/src
-   git clone https://github.com/flexivrobotics/flexiv_ros2.git -b jazzy-v1
+   git clone https://github.com/flexivrobotics/flexiv_ros2.git -b lyrical-v1
    ```
 
 4. Install dependencies:
 
    ```bash
    cd ~/flexiv_ros2_ws
-   vcs import src < src/flexiv_ros2/flexiv.jazzy.repos --recursive --skip-existing
+   vcs import src < src/flexiv_ros2/flexiv.lyrical.repos --recursive --skip-existing
    touch src/flexiv_rdk/COLCON_IGNORE
    rosdep update
-   rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
+   rosdep install --from-paths src --ignore-src --rosdistro lyrical -r -y
    ```
 
 5. Choose a directory for installing `flexiv_rdk` library and all its dependencies. For example, a new folder named `flexiv_install` under the home directory: `~/flexiv_install`. Compile and install to the installation directory:
 
    ```bash
    cd ~/flexiv_ros2_ws/src/flexiv_rdk/thirdparty
-   source /opt/ros/jazzy/setup.bash
-   bash build_and_install_dependencies_not_in_ros2.sh ~/flexiv_install
+   bash build_and_install_dependencies.sh ~/flexiv_install
    ```
 
 6. Configure and install `flexiv_rdk`:
@@ -80,16 +82,15 @@ This project was developed for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.
    ```bash
    cd ~/flexiv_ros2_ws/src/flexiv_rdk
    rm -rf build && mkdir build && cd build
-   source /opt/ros/jazzy/setup.bash
-   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install -DRDK_SUPPORT_ROS2_JAZZY=ON
-   make install
+   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install
+   cmake --build . --target install --config Release
    ```
 
 7. Build and source the workspace:
 
    ```bash
    cd ~/flexiv_ros2_ws
-   source /opt/ros/jazzy/setup.bash
+   source /opt/ros/lyrical/setup.bash
    colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/flexiv_install
    source install/setup.bash
    ```
@@ -110,7 +111,6 @@ If you are using a Flexiv dual robot setup, you can install `flexiv_drdk` as wel
 
    ```bash
    cd ~/flexiv_ros2_ws/src/flexiv_drdk/thirdparty
-   source /opt/ros/jazzy/setup.bash
    bash build_and_install_dependencies.sh ~/flexiv_install 8 --skip-rdk
    ```
 
@@ -119,7 +119,7 @@ If you are using a Flexiv dual robot setup, you can install `flexiv_drdk` as wel
    ```bash
    cd ~/flexiv_ros2_ws/src/flexiv_drdk
    rm -rf build && mkdir build && cd build
-   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install -DDRDK_SUPPORT_ROS2_JAZZY=ON
+   cmake .. -DCMAKE_INSTALL_PREFIX=~/flexiv_install
    make install
    ```
 
@@ -127,6 +127,7 @@ If you are using a Flexiv dual robot setup, you can install `flexiv_drdk` as wel
 
    ```bash
    cd ~/flexiv_ros2_ws
+   source /opt/ros/lyrical/setup.bash
    colcon build --symlink-install --cmake-args -DCMAKE_PREFIX_PATH=~/flexiv_install
    ```
 
@@ -134,7 +135,7 @@ If you are using a Flexiv dual robot setup, you can install `flexiv_drdk` as wel
 > Remember to source the setup file and the workspace whenever a new terminal is opened:
 >
 > ```bash
-> source /opt/ros/jazzy/setup.bash
+> source /opt/ros/lyrical/setup.bash
 > source ~/flexiv_ros2_ws/install/setup.bash
 > ```
 

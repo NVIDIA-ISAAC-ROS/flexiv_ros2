@@ -8,7 +8,7 @@
 #include <flexiv/rdk/model.hpp>
 #include <flexiv/rdk/robot.hpp>
 
-#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <ament_index_cpp/get_package_share_path.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <cctype>
@@ -149,7 +149,7 @@ int main(int argc, char** argv)
 
     try {
         const fs::path description_dir
-            = ament_index_cpp::get_package_share_directory("flexiv_description");
+            = ament_index_cpp::get_package_share_path("flexiv_description");
         const auto default_template = [&](const std::string& type) {
             return (description_dir / "config" / type / "default_kinematics.yaml").string();
         };

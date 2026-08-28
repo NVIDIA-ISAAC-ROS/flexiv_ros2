@@ -8,6 +8,8 @@
 
 #include "gpio_controller/gpio_controller.hpp"
 
+#include <algorithm>
+#include <array>
 #include <string>
 
 namespace gpio_controller {
@@ -68,10 +70,11 @@ controller_interface::return_type GPIOController::update(
     gpio_inputs_publisher_->publish(gpio_inputs_msg_);
 
     // set outputs
+    const auto& outputs = *digital_outputs_cmd_.readFromRT();
     for (size_t i = 0; i < command_interfaces_.size(); ++i) {
-        if (!command_interfaces_[i].set_value(digital_outputs_cmd_[i])) {
+        if (!command_interfaces_[i].set_value(outputs[i])) {
             RCLCPP_ERROR(get_node()->get_logger(),
-                "Failed to set digital output for pin %zu to state %f", i, digital_outputs_cmd_[i]);
+                "Failed to set digital output for pin %zu to state %f", i, outputs[i]);
             return controller_interface::return_type::ERROR;
         }
     }
@@ -87,7 +90,7 @@ controller_interface::CallbackReturn GPIOController::on_configure(
     std::string robot_sn = params_.robot_sn;
     if (robot_sn.empty()) {
         RCLCPP_ERROR(get_node()->get_logger(), "'robot_sn' parameter has to be specified.");
-        return CallbackReturn::ERROR;
+        return controller_interface::CallbackReturn::ERROR;
     } else {
         // Replace "-" with "_" in robot_sn to match the topic name
         std::replace(robot_sn.begin(), robot_sn.end(), '-', '_');
@@ -102,34 +105,40 @@ controller_interface::CallbackReturn GPIOController::on_configure(
         gpio_outputs_command_
             = get_node()->create_subscription<CmdType>("/" + robot_sn + kGPIOOutputsTopic,
                 rclcpp::SystemDefaultsQoS(), [this](const CmdType::SharedPtr msg) {
+                    // A command names only the pins it changes, so the current values are carried
+                    // over rather than reset.
+                    auto outputs = *digital_outputs_cmd_.readFromNonRT();
                     for (size_t i = 0; i < msg->states.size(); ++i) {
                         if (msg->states[i].pin >= kIOPorts) {
                             RCLCPP_WARN(get_node()->get_logger(),
-                                "Received command for pin %d, but only pins 0-15 are supported.",
-                                msg->states[i].pin);
+                                "Received command for pin %d, but only pins 0-%zu are supported.",
+                                msg->states[i].pin, kIOPorts - 1);
                             continue;
                         } else {
-                            digital_outputs_cmd_[msg->states[i].pin]
-                                = static_cast<double>(msg->states[i].state);
+                            outputs[msg->states[i].pin] = static_cast<double>(msg->states[i].state);
                         }
                     }
+                    digital_outputs_cmd_.writeFromNonRT(outputs);
                 });
     } catch (...) {
-        return LifecycleNodeInterface::CallbackReturn::ERROR;
+        return controller_interface::CallbackReturn::ERROR;
     }
-    return LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return controller_interface::CallbackReturn::SUCCESS;
 }
 
 void GPIOController::initMsgs()
 {
-    gpio_inputs_msg_.states.resize(digital_outputs_cmd_.size());
-    digital_outputs_cmd_.fill(0.0);
+    gpio_inputs_msg_.states.resize(kIOPorts);
+    std::array<double, kIOPorts> zeros {};
+    zeros.fill(0.0);
+    digital_outputs_cmd_.initRT(zeros);
+    digital_outputs_cmd_.writeFromNonRT(zeros);
 }
 
 controller_interface::CallbackReturn GPIOController::on_activate(
     const rclcpp_lifecycle::State& /*previous_state*/)
 {
-    return LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn GPIOController::on_deactivate(
@@ -139,9 +148,9 @@ controller_interface::CallbackReturn GPIOController::on_deactivate(
         // reset publisher
         gpio_inputs_publisher_.reset();
     } catch (...) {
-        return LifecycleNodeInterface::CallbackReturn::ERROR;
+        return controller_interface::CallbackReturn::ERROR;
     }
-    return LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return controller_interface::CallbackReturn::SUCCESS;
 }
 
 } // namespace gpio_controller

@@ -1,10 +1,13 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 project(flexiv_robot_states_broadcaster LANGUAGES CXX)
 
-# Default to C++14
+# ROS 2 Lyrical requires C++20
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -12,7 +15,9 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(rcutils REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(flexiv_hardware REQUIRED)
@@ -56,8 +61,17 @@ target_link_libraries(flexiv_robot_states_broadcaster PUBLIC
   flexiv::flexiv_rdk
 )
 
-ament_target_dependencies(flexiv_robot_states_broadcaster PUBLIC
-  ${THIS_PACKAGE_INCLUDE_DEPENDS}
+target_link_libraries(flexiv_robot_states_broadcaster PUBLIC
+  builtin_interfaces::builtin_interfaces
+  controller_interface::controller_interface
+  flexiv_hardware::flexiv_hardware
+  flexiv_msgs::flexiv_msgs
+  geometry_msgs::geometry_msgs
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp_lifecycle::rclcpp_lifecycle
+  rcutils::rcutils
+  realtime_tools::realtime_tools
 )
 
 # prevent pluginlib from using boost

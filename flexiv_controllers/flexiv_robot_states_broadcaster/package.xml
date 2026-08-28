@@ -5,12 +5,14 @@
   <version>1.9.3</version>
   <description>The robot states broadcaster publishes the Flexiv robot states.</description>
   <maintainer email="munseng.phoon@flexiv.com">Mun Seng Phoon</maintainer>
-  <license>Apache License 2.0</license>
+  <license>Apache-2.0</license>
   <author email="munseng.phoon@flexiv.com">Mun Seng Phoon</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>controller_interface</depend>
+  <depend>rcutils</depend>
+  <depend>builtin_interfaces</depend>
   <depend>flexiv_hardware</depend>
   <depend>flexiv_msgs</depend>
   <depend>generate_parameter_library</depend>

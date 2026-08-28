@@ -59,7 +59,9 @@ def launch_setup(context):
     fake_sensor_commands = LaunchConfiguration("fake_sensor_commands")
     warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path")
     start_servo = LaunchConfiguration("start_servo")
-    kinematics_params_file = LaunchConfiguration("kinematics_params_file").perform(context)
+    kinematics_params_file = LaunchConfiguration("kinematics_params_file").perform(
+        context
+    )
     # Passing an empty path through would reach xacro.load_yaml('') and abort.
     kinematics_xacro_arg = (
         f" kinematics_parameters_file:={kinematics_params_file}"
@@ -279,13 +281,7 @@ def launch_setup(context):
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[
-            robot_description,
-            ParameterFile(robot_controllers, allow_substs=True),
-            {"robot_sn": robot_sn},
-            {"rdk_control_mode": rdk_control_mode},
-        ],
-        remappings=[("joint_states", "flexiv_rizon_arm/joint_states")],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         output="both",
     )
 
@@ -309,10 +305,13 @@ def launch_setup(context):
     robot_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "rizon_arm_controller",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
         ],
     )
 
@@ -320,10 +319,15 @@ def launch_setup(context):
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+            "--controller-ros-args",
+            "-r joint_states:=flexiv_rizon_arm/joint_states",
         ],
     )
 
@@ -331,8 +335,14 @@ def launch_setup(context):
     flexiv_robot_states_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["flexiv_robot_states_broadcaster"],
-        parameters=[{"robot_sn": robot_sn}],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "flexiv_robot_states_broadcaster",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 
@@ -396,8 +406,14 @@ def launch_setup(context):
     gpio_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["gpio_controller", "--controller-manager", "/controller_manager"],
-        parameters=[{"robot_sn": robot_sn}],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "gpio_controller",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 

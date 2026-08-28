@@ -5,7 +5,7 @@
   <version>1.9.3</version>
   <description>Package with launch files and run-time configurations for Flexiv robots with `ros2_control`</description>
   <maintainer email="munseng.phoon@flexiv.com">Mun Seng Phoon</maintainer>
-  <license>Apache License 2.0</license>
+  <license>Apache-2.0</license>
   <author email="munseng.phoon@flexiv.com">Mun Seng Phoon</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -15,6 +15,7 @@
   <exec_depend>flexiv_gripper</exec_depend>
   <exec_depend>flexiv_hardware</exec_depend>
   <exec_depend>flexiv_robot_states_broadcaster</exec_depend>
+  <exec_depend>gpio_controller</exec_depend>
   <exec_depend>flexiv_test_nodes</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>

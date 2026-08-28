@@ -266,14 +266,7 @@ def generate_launch_description():
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[
-            robot_description,
-            ParameterFile(robot_controllers, allow_substs=True),
-            {"robot_sn": robot_sn},
-            {"rdk_control_mode": rdk_control_mode},
-            {"external_axis_prefix": external_axis_prefix},
-        ],
-        remappings=[("joint_states", "flexiv_rizon_arm/joint_states")],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         output="both",
     )
 
@@ -306,17 +299,29 @@ def generate_launch_description():
     robot_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=[robot_controller, "--controller-manager", "/controller_manager"],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            robot_controller,
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
     )
 
     # Run joint state broadcaster
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+            "--controller-ros-args",
+            "-r joint_states:=flexiv_rizon_arm/joint_states",
         ],
     )
 
@@ -324,8 +329,14 @@ def generate_launch_description():
     flexiv_robot_states_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["flexiv_robot_states_broadcaster"],
-        parameters=[{"robot_sn": robot_sn}],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "flexiv_robot_states_broadcaster",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 
@@ -369,8 +380,14 @@ def generate_launch_description():
     gpio_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["gpio_controller", "--controller-manager", "/controller_manager"],
-        parameters=[{"robot_sn": robot_sn}],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "gpio_controller",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 

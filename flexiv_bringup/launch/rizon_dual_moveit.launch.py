@@ -379,16 +379,7 @@ def launch_setup(context):
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[
-            robot_description,
-            ParameterFile(robot_controllers, allow_substs=True),
-            {"robot_sn_left": robot_sn_left},
-            {"robot_sn_right": robot_sn_right},
-            {"prefix_left": prefix_left_str},
-            {"prefix_right": prefix_right_str},
-            {"rdk_control_mode": rdk_control_mode},
-        ],
-        remappings=[("joint_states", "flexiv_dual_arm/joint_states")],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         output="both",
     )
 
@@ -413,20 +404,26 @@ def launch_setup(context):
     left_rizon_arm_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "left_rizon_arm_controller",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
         ],
     )
 
     right_rizon_arm_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "right_rizon_arm_controller",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
         ],
     )
 
@@ -434,10 +431,15 @@ def launch_setup(context):
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "joint_state_broadcaster",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+            "--controller-ros-args",
+            "-r joint_states:=flexiv_dual_arm/joint_states",
         ],
     )
 
@@ -445,14 +447,28 @@ def launch_setup(context):
     flexiv_robot_states_broadcaster_left_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["flexiv_robot_states_broadcaster_left"],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "flexiv_robot_states_broadcaster_left",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 
     flexiv_robot_states_broadcaster_right_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["flexiv_robot_states_broadcaster_right"],
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "flexiv_robot_states_broadcaster_right",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         condition=UnlessCondition(use_fake_hardware),
     )
 
@@ -530,20 +546,26 @@ def launch_setup(context):
     gpio_controller_left_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "gpio_controller_left",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
         ],
         condition=UnlessCondition(use_fake_hardware),
     )
     gpio_controller_right_spawner = Node(
         package="controller_manager",
         executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
         arguments=[
             "gpio_controller_right",
             "--controller-manager",
             "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
         ],
         condition=UnlessCondition(use_fake_hardware),
     )

@@ -29,7 +29,7 @@
         <xacro:if value="${use_fake_hardware}">
           <plugin>mock_components/GenericSystem</plugin>
           <param name="mock_sensor_commands">${fake_sensor_commands}</param>
-          <param name="state_following_offset">0.0</param>
+          <param name="position_state_following_offset">0.0</param>
         </xacro:if>
         <xacro:unless value="${use_fake_hardware}">
           <plugin>flexiv_hardware/FlexivHardwareInterface</plugin>

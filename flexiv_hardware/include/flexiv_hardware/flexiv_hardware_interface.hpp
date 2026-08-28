@@ -67,9 +67,8 @@ public:
     hardware_interface::CallbackReturn on_error(
         const rclcpp_lifecycle::State& previous_state) override;
 
-    std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
-
-    std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+    std::vector<hardware_interface::InterfaceDescription>
+    export_unlisted_state_interface_descriptions() override;
 
     hardware_interface::return_type prepare_command_mode_switch(
         const std::vector<std::string>& start_interfaces,
@@ -121,6 +120,23 @@ private:
     /** @brief Tear down the recovery node and release the robot connection. */
     void Disconnect();
 
+    /**
+     * @brief Resolve the framework-owned interface handles once, in declaration order, so that
+     * read() and write() need no name lookup. Called from on_configure(), by which point the
+     * resource manager has already created the interfaces from the URDF.
+     * @return True if every expected interface was found.
+     */
+    bool ResolveInterfaceHandles();
+
+    /** @brief Copy the internal state buffers into the framework's state interfaces. */
+    void PublishStatesToInterfaces();
+
+    /** @brief Copy the framework's command interfaces into the internal command buffers. */
+    void ReadCommandsFromInterfaces();
+
+    /** @brief Copy the internal command buffers into the framework's command interfaces. */
+    void PushCommandsToInterfaces();
+
     // Flexiv RDK
     std::unique_ptr<flexiv::rdk::Robot> robot_;
 
@@ -149,7 +165,6 @@ private:
 
     // Robot States
     flexiv::rdk::RobotStates hw_flexiv_robot_states_;
-    flexiv::rdk::RobotStates* hw_flexiv_robot_states_addr_ = &hw_flexiv_robot_states_;
 
     // GPIO commands and states
     std::vector<double> hw_commands_gpio_out_;
@@ -160,6 +175,19 @@ private:
     bool was_ready_ = false;
 
     std::vector<double> hw_states_gpio_in_;
+
+    // Framework-owned interface handles, resolved once in on_configure() and stored in the same
+    // order as info_.joints / info_.gpios, so that read() and write() do no name lookup and take no
+    // lock on the real-time path.
+    std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_joint_positions_;
+    std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_joint_velocities_;
+    std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_joint_efforts_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_joint_positions_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_joint_velocities_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_joint_efforts_;
+    std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_gpio_in_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_gpio_out_;
+    hardware_interface::StateInterface::SharedPtr handle_state_flexiv_robot_states_;
 
     // Map from RDK joint index to ROS joint index
     // RDK expects: [ext_axis_1, ..., ext_axis_N, arm_joint_1, ..., arm_joint_7]

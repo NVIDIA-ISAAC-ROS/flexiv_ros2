@@ -6,6 +6,8 @@
  * @author Flexiv
  */
 
+#include <bit>
+#include <tuple>
 #include <vector>
 #include <string>
 #include <thread>
@@ -281,6 +283,11 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_configure(
             driver_status_, std::move(setters));
     executor->add_node(joint_impedance_config_node_->get_node_base_interface());
 
+    if (!ResolveInterfaceHandles()) {
+        Disconnect();
+        return hardware_interface::CallbackReturn::ERROR;
+    }
+
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -376,55 +383,125 @@ rclcpp::Logger FlexivHardwareInterface::getLogger()
     return rclcpp::get_logger("FlexivHardwareInterface");
 }
 
-std::vector<hardware_interface::StateInterface> FlexivHardwareInterface::export_state_interfaces()
+std::vector<hardware_interface::InterfaceDescription>
+FlexivHardwareInterface::export_unlisted_state_interface_descriptions()
 {
-    RCLCPP_INFO(getLogger(), "export_state_interfaces");
+    hardware_interface::InterfaceInfo states_info;
+    states_info.name = "flexiv_robot_states";
+    states_info.data_type = "double";
+    states_info.enable_limits = false;
 
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-    for (std::size_t i = 0; i < info_.joints.size(); i++) {
-        state_interfaces.emplace_back(hardware_interface::StateInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_POSITION, &hw_states_joint_positions_[i]));
-        state_interfaces.emplace_back(hardware_interface::StateInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_VELOCITY, &hw_states_joint_velocities_[i]));
-        state_interfaces.emplace_back(hardware_interface::StateInterface(
-            info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_states_joint_efforts_[i]));
-    }
-
-    std::string robot_sn = info_.hardware_parameters.at("robot_sn");
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-        robot_sn, "flexiv_robot_states", reinterpret_cast<double*>(&hw_flexiv_robot_states_addr_)));
-
-    const std::string prefix = info_.hardware_parameters.at("prefix");
-    for (std::size_t i = 0; i < flexiv::rdk::kIOPorts; i++) {
-        state_interfaces.emplace_back(hardware_interface::StateInterface(
-            prefix + "gpio", "digital_input_" + std::to_string(i), &hw_states_gpio_in_[i]));
-    }
-
-    return state_interfaces;
+    return {hardware_interface::InterfaceDescription(
+        info_.hardware_parameters.at("robot_sn"), states_info)};
 }
 
-std::vector<hardware_interface::CommandInterface>
-FlexivHardwareInterface::export_command_interfaces()
+bool FlexivHardwareInterface::ResolveInterfaceHandles()
 {
-    RCLCPP_INFO(getLogger(), "export_command_interfaces");
+    handles_state_joint_positions_.clear();
+    handles_state_joint_velocities_.clear();
+    handles_state_joint_efforts_.clear();
+    handles_command_joint_positions_.clear();
+    handles_command_joint_velocities_.clear();
+    handles_command_joint_efforts_.clear();
+    handles_state_gpio_in_.clear();
+    handles_command_gpio_out_.clear();
 
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-    for (size_t i = 0; i < info_.joints.size(); i++) {
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_POSITION, &hw_commands_joint_positions_[i]));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_VELOCITY, &hw_commands_joint_velocities_[i]));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_EFFORT, &hw_commands_joint_efforts_[i]));
+    handles_state_joint_positions_.reserve(info_.joints.size());
+    handles_state_joint_velocities_.reserve(info_.joints.size());
+    handles_state_joint_efforts_.reserve(info_.joints.size());
+    handles_command_joint_positions_.reserve(info_.joints.size());
+    handles_command_joint_velocities_.reserve(info_.joints.size());
+    handles_command_joint_efforts_.reserve(info_.joints.size());
+
+    try {
+        // Resolved from info_.joints rather than from the framework's unordered maps, so that the
+        // handle order matches the joint order the RDK index map was built against.
+        for (const auto& joint : info_.joints) {
+            handles_state_joint_positions_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_POSITION));
+            handles_state_joint_velocities_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_VELOCITY));
+            handles_state_joint_efforts_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_EFFORT));
+            handles_command_joint_positions_.push_back(get_command_interface_handle(
+                joint.name + "/" + hardware_interface::HW_IF_POSITION));
+            handles_command_joint_velocities_.push_back(get_command_interface_handle(
+                joint.name + "/" + hardware_interface::HW_IF_VELOCITY));
+            handles_command_joint_efforts_.push_back(
+                get_command_interface_handle(joint.name + "/" + hardware_interface::HW_IF_EFFORT));
+        }
+
+        const std::string prefix = info_.hardware_parameters.at("prefix");
+        handles_state_gpio_in_.reserve(hw_states_gpio_in_.size());
+        handles_command_gpio_out_.reserve(hw_commands_gpio_out_.size());
+        for (std::size_t i = 0; i < hw_states_gpio_in_.size(); i++) {
+            handles_state_gpio_in_.push_back(
+                get_state_interface_handle(prefix + "gpio/digital_input_" + std::to_string(i)));
+        }
+        for (std::size_t i = 0; i < hw_commands_gpio_out_.size(); i++) {
+            handles_command_gpio_out_.push_back(
+                get_command_interface_handle(prefix + "gpio/digital_output_" + std::to_string(i)));
+        }
+
+        handle_state_flexiv_robot_states_ = get_state_interface_handle(
+            info_.hardware_parameters.at("robot_sn") + "/flexiv_robot_states");
+    } catch (const std::exception& ex) {
+        RCLCPP_FATAL(getLogger(), "Could not resolve interface handles: %s", ex.what());
+        return false;
     }
 
-    const std::string prefix = info_.hardware_parameters.at("prefix");
-    for (size_t i = 0; i < flexiv::rdk::kIOPorts; i++) {
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(
-            prefix + "gpio", "digital_output_" + std::to_string(i), &hw_commands_gpio_out_[i]));
-    }
+    // The states pointer never moves, so it is published once here rather than every read().
+    std::ignore = set_state(
+        handle_state_flexiv_robot_states_, std::bit_cast<double>(&hw_flexiv_robot_states_), true);
 
-    return command_interfaces;
+    return true;
+}
+
+void FlexivHardwareInterface::PublishStatesToInterfaces()
+{
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = set_state(handles_state_joint_positions_[i], hw_states_joint_positions_[i],
+            /*wait_until_set=*/false);
+        std::ignore = set_state(handles_state_joint_velocities_[i], hw_states_joint_velocities_[i],
+            /*wait_until_set=*/false);
+        std::ignore = set_state(
+            handles_state_joint_efforts_[i], hw_states_joint_efforts_[i], /*wait_until_set=*/false);
+    }
+    for (std::size_t i = 0; i < handles_state_gpio_in_.size(); i++) {
+        std::ignore
+            = set_state(handles_state_gpio_in_[i], hw_states_gpio_in_[i], /*wait_until_set=*/false);
+    }
+}
+
+void FlexivHardwareInterface::PushCommandsToInterfaces()
+{
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = set_command(handles_command_joint_positions_[i],
+            hw_commands_joint_positions_[i], /*wait_until_set=*/true);
+        std::ignore = set_command(handles_command_joint_velocities_[i],
+            hw_commands_joint_velocities_[i], /*wait_until_set=*/true);
+        std::ignore = set_command(handles_command_joint_efforts_[i], hw_commands_joint_efforts_[i],
+            /*wait_until_set=*/true);
+    }
+}
+
+void FlexivHardwareInterface::ReadCommandsFromInterfaces()
+{
+    // A handle whose value cannot be read without blocking keeps its previous buffered value, which
+    // for position commands is the last setpoint and for efforts is NaN -- both of which write()
+    // already handles.
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = get_command(handles_command_joint_positions_[i],
+            hw_commands_joint_positions_[i], /*wait_until_get=*/false);
+        std::ignore = get_command(handles_command_joint_velocities_[i],
+            hw_commands_joint_velocities_[i], /*wait_until_get=*/false);
+        std::ignore = get_command(handles_command_joint_efforts_[i], hw_commands_joint_efforts_[i],
+            /*wait_until_get=*/false);
+    }
+    for (std::size_t i = 0; i < handles_command_gpio_out_.size(); i++) {
+        std::ignore = get_command(
+            handles_command_gpio_out_[i], hw_commands_gpio_out_[i], /*wait_until_get=*/false);
+    }
 }
 
 bool FlexivHardwareInterface::WaitUntilOperational(std::chrono::seconds timeout)
@@ -572,6 +649,8 @@ hardware_interface::return_type FlexivHardwareInterface::read(
 
     TrackPositionChangeAcrossInterruption();
 
+    PublishStatesToInterfaces();
+
     return hardware_interface::return_type::OK;
 }
 
@@ -584,6 +663,8 @@ hardware_interface::return_type FlexivHardwareInterface::write(
     if (driver_status_->driver_state.load() != DriverState::READY) {
         return hardware_interface::return_type::OK;
     }
+
+    ReadCommandsFromInterfaces();
 
     // Initialize target vectors to hold position
     std::vector<double> target_pos(robot_->info().DoF);
@@ -682,6 +763,11 @@ void FlexivHardwareInterface::SynchronizeCommandsWithState()
     // enabled and would leave the arm floating freely instead of holding.
     std::fill(hw_commands_joint_efforts_.begin(), hw_commands_joint_efforts_.end(),
         std::numeric_limits<double>::quiet_NaN());
+
+    // The command buffers no longer alias the framework's interface storage, so the synchronized
+    // values have to be pushed across explicitly. Called off the real-time path, so this waits for
+    // the lock.
+    PushCommandsToInterfaces();
 }
 
 hardware_interface::return_type FlexivHardwareInterface::prepare_command_mode_switch(

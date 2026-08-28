@@ -5,6 +5,9 @@
  * @author Flexiv
  */
 
+#include <bit>
+#include <tuple>
+#include <utility>
 #include <vector>
 #include <string>
 #include <thread>
@@ -291,73 +294,144 @@ rclcpp::Logger FlexivDualHardwareInterface::getLogger()
     return rclcpp::get_logger("FlexivDualHardwareInterface");
 }
 
-std::vector<hardware_interface::StateInterface>
-FlexivDualHardwareInterface::export_state_interfaces()
+std::vector<hardware_interface::InterfaceDescription>
+FlexivDualHardwareInterface::export_unlisted_state_interface_descriptions()
 {
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-    for (std::size_t i = 0; i < info_.joints.size(); i++) {
-        state_interfaces.emplace_back(hardware_interface::StateInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_POSITION, &hw_states_joint_positions_[i]));
-        state_interfaces.emplace_back(hardware_interface::StateInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_VELOCITY, &hw_states_joint_velocities_[i]));
-        state_interfaces.emplace_back(hardware_interface::StateInterface(
-            info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_states_joint_efforts_[i]));
+
+    std::vector<hardware_interface::InterfaceDescription> descriptions;
+    for (const auto& prefix_param : {"prefix_left", "prefix_right"}) {
+        std::string robot_name = info_.hardware_parameters.at(prefix_param);
+        if (!robot_name.empty() && robot_name.back() == '_') {
+            robot_name.pop_back();
+        }
+
+        hardware_interface::InterfaceInfo states_info;
+        states_info.name = "flexiv_robot_states";
+        states_info.data_type = "double";
+        states_info.enable_limits = false;
+
+        descriptions.emplace_back(robot_name, states_info);
     }
-
-    // GPIOs
-    const std::string prefix_left = info_.hardware_parameters.at("prefix_left");
-    const std::string prefix_right = info_.hardware_parameters.at("prefix_right");
-
-    // Remove trailing underscore from prefix to get the robot name used in controllers
-    std::string robot_name_left = prefix_left;
-    if (!robot_name_left.empty() && robot_name_left.back() == '_') {
-        robot_name_left.pop_back();
-    }
-    std::string robot_name_right = prefix_right;
-    if (!robot_name_right.empty() && robot_name_right.back() == '_') {
-        robot_name_right.pop_back();
-    }
-
-    // Export robot states for both robots
-    state_interfaces.emplace_back(hardware_interface::StateInterface(robot_name_left,
-        "flexiv_robot_states", reinterpret_cast<double*>(&hw_flexiv_robot_states_addr_left_)));
-
-    state_interfaces.emplace_back(hardware_interface::StateInterface(robot_name_right,
-        "flexiv_robot_states", reinterpret_cast<double*>(&hw_flexiv_robot_states_addr_right_)));
-    for (size_t i = 0; i < flexiv::rdk::kIOPorts; i++) {
-        state_interfaces.emplace_back(hardware_interface::StateInterface(
-            prefix_left + "gpio", "digital_input_" + std::to_string(i), &hw_states_gpio_in_[i]));
-        state_interfaces.emplace_back(hardware_interface::StateInterface(prefix_right + "gpio",
-            "digital_input_" + std::to_string(i), &hw_states_gpio_in_[i + flexiv::rdk::kIOPorts]));
-    }
-
-    return state_interfaces;
+    return descriptions;
 }
 
-std::vector<hardware_interface::CommandInterface>
-FlexivDualHardwareInterface::export_command_interfaces()
+bool FlexivDualHardwareInterface::ResolveInterfaceHandles()
 {
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-    for (size_t i = 0; i < info_.joints.size(); i++) {
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_POSITION, &hw_commands_joint_positions_[i]));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_VELOCITY, &hw_commands_joint_velocities_[i]));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(info_.joints[i].name,
-            hardware_interface::HW_IF_EFFORT, &hw_commands_joint_efforts_[i]));
+    handles_state_joint_positions_.clear();
+    handles_state_joint_velocities_.clear();
+    handles_state_joint_efforts_.clear();
+    handles_command_joint_positions_.clear();
+    handles_command_joint_velocities_.clear();
+    handles_command_joint_efforts_.clear();
+    handles_state_gpio_in_.clear();
+    handles_command_gpio_out_.clear();
+
+    handles_state_joint_positions_.reserve(info_.joints.size());
+    handles_state_joint_velocities_.reserve(info_.joints.size());
+    handles_state_joint_efforts_.reserve(info_.joints.size());
+    handles_command_joint_positions_.reserve(info_.joints.size());
+    handles_command_joint_velocities_.reserve(info_.joints.size());
+    handles_command_joint_efforts_.reserve(info_.joints.size());
+    handles_state_gpio_in_.reserve(hw_states_gpio_in_.size());
+    handles_command_gpio_out_.reserve(hw_commands_gpio_out_.size());
+
+    try {
+        // Resolved from info_.joints rather than from the framework's unordered maps, so that the
+        // handle order matches the joint order the RDK index maps were built against.
+        for (const auto& joint : info_.joints) {
+            handles_state_joint_positions_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_POSITION));
+            handles_state_joint_velocities_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_VELOCITY));
+            handles_state_joint_efforts_.push_back(
+                get_state_interface_handle(joint.name + "/" + hardware_interface::HW_IF_EFFORT));
+            handles_command_joint_positions_.push_back(get_command_interface_handle(
+                joint.name + "/" + hardware_interface::HW_IF_POSITION));
+            handles_command_joint_velocities_.push_back(get_command_interface_handle(
+                joint.name + "/" + hardware_interface::HW_IF_VELOCITY));
+            handles_command_joint_efforts_.push_back(
+                get_command_interface_handle(joint.name + "/" + hardware_interface::HW_IF_EFFORT));
+        }
+
+        // The GPIO buffers hold both robots back to back: left at [i], right at [i + kIOPorts].
+        // The handle vectors follow the same layout.
+        const std::string prefix_left = info_.hardware_parameters.at("prefix_left");
+        const std::string prefix_right = info_.hardware_parameters.at("prefix_right");
+        for (const auto& prefix : {prefix_left, prefix_right}) {
+            for (std::size_t i = 0; i < flexiv::rdk::kIOPorts; i++) {
+                handles_state_gpio_in_.push_back(
+                    get_state_interface_handle(prefix + "gpio/digital_input_" + std::to_string(i)));
+                handles_command_gpio_out_.push_back(get_command_interface_handle(
+                    prefix + "gpio/digital_output_" + std::to_string(i)));
+            }
+        }
+
+        // The states pointers never move, so they are published once here rather than every read().
+        for (const auto& [prefix_param, states] :
+            {std::pair<const char*, flexiv::rdk::RobotStates*> {
+                 "prefix_left", &hw_flexiv_robot_states_left_},
+                std::pair<const char*, flexiv::rdk::RobotStates*> {
+                    "prefix_right", &hw_flexiv_robot_states_right_}}) {
+            std::string robot_name = info_.hardware_parameters.at(prefix_param);
+            if (!robot_name.empty() && robot_name.back() == '_') {
+                robot_name.pop_back();
+            }
+            std::ignore = set_state(get_state_interface_handle(robot_name + "/flexiv_robot_states"),
+                std::bit_cast<double>(states), true);
+        }
+    } catch (const std::exception& ex) {
+        RCLCPP_FATAL(getLogger(), "Could not resolve interface handles: %s", ex.what());
+        return false;
     }
 
-    const std::string prefix_left = info_.hardware_parameters.at("prefix_left");
-    const std::string prefix_right = info_.hardware_parameters.at("prefix_right");
-    for (size_t i = 0; i < flexiv::rdk::kIOPorts; i++) {
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(prefix_left + "gpio",
-            "digital_output_" + std::to_string(i), &hw_commands_gpio_out_[i]));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(prefix_right + "gpio",
-            "digital_output_" + std::to_string(i),
-            &hw_commands_gpio_out_[i + flexiv::rdk::kIOPorts]));
-    }
+    return true;
+}
 
-    return command_interfaces;
+void FlexivDualHardwareInterface::PublishStatesToInterfaces()
+{
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = set_state(handles_state_joint_positions_[i], hw_states_joint_positions_[i],
+            /*wait_until_set=*/false);
+        std::ignore = set_state(handles_state_joint_velocities_[i], hw_states_joint_velocities_[i],
+            /*wait_until_set=*/false);
+        std::ignore = set_state(
+            handles_state_joint_efforts_[i], hw_states_joint_efforts_[i], /*wait_until_set=*/false);
+    }
+    for (std::size_t i = 0; i < handles_state_gpio_in_.size(); i++) {
+        std::ignore
+            = set_state(handles_state_gpio_in_[i], hw_states_gpio_in_[i], /*wait_until_set=*/false);
+    }
+}
+
+void FlexivDualHardwareInterface::ReadCommandsFromInterfaces()
+{
+    // A handle whose value cannot be read without blocking keeps its previous buffered value, which
+    // for position commands is the last setpoint and for efforts is NaN -- both of which write()
+    // already handles.
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = get_command(handles_command_joint_positions_[i],
+            hw_commands_joint_positions_[i], /*wait_until_get=*/false);
+        std::ignore = get_command(handles_command_joint_velocities_[i],
+            hw_commands_joint_velocities_[i], /*wait_until_get=*/false);
+        std::ignore = get_command(handles_command_joint_efforts_[i], hw_commands_joint_efforts_[i],
+            /*wait_until_get=*/false);
+    }
+    for (std::size_t i = 0; i < handles_command_gpio_out_.size(); i++) {
+        std::ignore = get_command(
+            handles_command_gpio_out_[i], hw_commands_gpio_out_[i], /*wait_until_get=*/false);
+    }
+}
+
+void FlexivDualHardwareInterface::PushCommandsToInterfaces()
+{
+    for (std::size_t i = 0; i < info_.joints.size(); i++) {
+        std::ignore = set_command(handles_command_joint_positions_[i],
+            hw_commands_joint_positions_[i], /*wait_until_set=*/true);
+        std::ignore = set_command(handles_command_joint_velocities_[i],
+            hw_commands_joint_velocities_[i], /*wait_until_set=*/true);
+        std::ignore = set_command(handles_command_joint_efforts_[i], hw_commands_joint_efforts_[i],
+            /*wait_until_set=*/true);
+    }
 }
 
 hardware_interface::CallbackReturn FlexivDualHardwareInterface::on_configure(
@@ -440,6 +514,11 @@ hardware_interface::CallbackReturn FlexivDualHardwareInterface::on_configure(
             std::move(bounds), rdk_control_mode_ == flexiv::rdk::Mode::NRT_JOINT_IMPEDANCE,
             driver_status_, std::move(setters));
     executor->add_node(joint_impedance_config_node_->get_node_base_interface());
+
+    if (!ResolveInterfaceHandles()) {
+        TeardownRecoveryNode();
+        return hardware_interface::CallbackReturn::ERROR;
+    }
 
     return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -557,6 +636,11 @@ void FlexivDualHardwareInterface::SynchronizeCommandsWithState()
     // with gravity compensation enabled and would leave the arms floating instead of holding.
     std::fill(hw_commands_joint_efforts_.begin(), hw_commands_joint_efforts_.end(),
         std::numeric_limits<double>::quiet_NaN());
+
+    // The command buffers no longer alias the framework's interface storage, so the synchronized
+    // values have to be pushed across explicitly. Called off the real-time path, so this waits for
+    // the lock.
+    PushCommandsToInterfaces();
 }
 
 hardware_interface::CallbackReturn FlexivDualHardwareInterface::on_activate(
@@ -698,6 +782,8 @@ hardware_interface::return_type FlexivDualHardwareInterface::read(
 
     TrackPositionChangeAcrossInterruption();
 
+    PublishStatesToInterfaces();
+
     return hardware_interface::return_type::OK;
 }
 
@@ -710,6 +796,8 @@ hardware_interface::return_type FlexivDualHardwareInterface::write(
     if (driver_status_->driver_state.load() != DriverState::READY) {
         return hardware_interface::return_type::OK;
     }
+
+    ReadCommandsFromInterfaces();
 
     // Initialize target position and velocity vectors
     std::vector<double> target_pos_left(robot_pair_->info().first.DoF);

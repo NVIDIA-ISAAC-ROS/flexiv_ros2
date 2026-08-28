@@ -14,7 +14,7 @@ For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flex
 | ---------------- | ------------------------------------------------------------- |
 | Ubuntu 22.04     | [Humble Hawksbill](https://docs.ros.org/en/humble/index.html) |
 | Ubuntu 24.04     | [Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html)     |
-| Ubuntu 26.04     | [Lyrical Luth](https://docs.ros.org/en/lyrical/index.html)     |
+| Ubuntu 26.04     | [Lyrical Luth](https://docs.ros.org/en/lyrical/index.html)    |
 
 ### Release Status
 

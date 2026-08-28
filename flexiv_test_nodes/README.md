@@ -8,7 +8,7 @@ These nodes demonstrate how to publish and monitor Flexiv robot states directly 
 
 ### Requirements
 
-- ROS 2 Humble or Jazzy
+- ROS 2 Humble, Jazzy or Lyrical
 - `flexivrdk` Python package (install via `pip install flexivrdk`)
 - `flexiv_msgs` package (built with `flexiv_ros2`)
 
@@ -21,7 +21,7 @@ Publishes robot states directly from Flexiv RDK to the ROS 2 topic, bypassing th
 - Direct RDK integration using Python `flexivrdk` package
 - Publishes Flexiv robot states at 100 Hz
 - Monitors robot status (busy, operational, fault, reduced)
-- Compatible with ROS 2 Humble and Jazzy
+- Compatible with ROS 2 Humble, Jazzy and Lyrical
 
 **Use case:** When you need direct robot state monitoring instead of the `flexiv_robot_states_broadcaster` node from the main driver stack.
 

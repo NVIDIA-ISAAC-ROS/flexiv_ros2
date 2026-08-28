@@ -5,7 +5,7 @@
   <version>1.9.3</version>
   <description>MoveIt2 configuration and launch files for Flexiv Rizon robots</description>
   <maintainer email="munseng.phoon@flexiv.com">Mun Seng Phoon</maintainer>
-  <license>Apache 2.0</license>
+  <license>Apache-2.0</license>
   <author email="munseng.phoon@flexiv.com">Mun Seng Phoon</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

@@ -4,6 +4,31 @@
 
 For ROS 2 users to easily work with [RDK](https://github.com/flexivrobotics/flexiv_rdk), the APIs of RDK are wrapped into ROS packages in `flexiv_ros2`. Key functionalities like realtime and non-realtime joint torque and position control are supported, and the integration with `ros2_control` framework and MoveIt! 2 is also implemented.
 
+## NVIDIA Isaac ROS Fork
+
+This branch tracks [`release/lyrical-v1.9.4`](https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.4) upstream and adds only what Isaac for Manipulation needs on top of it:
+
+- **Cartesian motion-force control.** The hardware interface exports TCP pose and wrench interfaces, `cartesian_motion_controller` streams setpoints from a `flexiv_msgs/msg/CartesianMotionForceCommand` topic, and the impedance, null-space, contact-wrench and force-control settings are exposed as services.
+- **Runtime Cartesian switching.** With `runtime_cartesian_switching:=true` the driver comes up in a joint mode and is prepared to hand command authority to the Cartesian controller later, so a joint trajectory can be followed by a task-space policy without restarting the driver. Zeroing the force/torque sensor still happens once at activation, while the robot is parked and empty-handed.
+- **`streaming_position_controller`.** Forwards `sensor_msgs/msg/JointState` positions to the joint command interfaces with velocity clamping, for policies that publish joint targets directly.
+- **Blocking gripper commands.** The `GripperCommand` action waits for the motion to finish and reports a stall against a fraction of the commanded `max_effort`, so a grasp is not reported complete before the fingers have closed.
+- **Calibrated model export.** `flexiv_hardware/scripts/export_calibrated_model.py` writes the robot's calibrated kinematics into a URDF that the Isaac manipulation pipeline splices into its cuMotion description.
+
+Everything else is upstream. In particular, this branch no longer builds `ros2_control` / `ros2_controllers` from source and no longer wraps the RDK in a symbol-isolated shared library: `flexiv_rdk` v1.9.4 already ships as a self-contained library with its dependencies statically embedded and symbol-hidden, and Lyrical's `ros2_control` Debian packages are used directly.
+
+### Cartesian Control
+
+```bash
+# Cartesian motion-force control for the whole session
+ros2 launch flexiv_bringup rizon.launch.py robot_sn:=[robot_sn] robot_type:=[robot_type] \
+  rdk_control_mode:=cartesian_motion_force robot_controller:=cartesian_motion_controller
+
+# Joint control, with the Cartesian controller loaded inactive so it can take over at runtime
+ros2 launch flexiv_bringup rizon.launch.py robot_sn:=[robot_sn] robot_type:=[robot_type] \
+  runtime_cartesian_switching:=true
+ros2 control switch_controllers --deactivate rizon_arm_controller --activate cartesian_motion_controller
+```
+
 ## References
 
 [Flexiv RDK main webpage](https://www.flexiv.com/software/rdk) contains important information like RDK user manual and network setup.

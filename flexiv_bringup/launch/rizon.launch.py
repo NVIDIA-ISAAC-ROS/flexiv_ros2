@@ -32,6 +32,7 @@ def generate_launch_description():
     use_fake_hardware_param_name = "use_fake_hardware"
     fake_sensor_commands_param_name = "fake_sensor_commands"
     robot_controller_param_name = "robot_controller"
+    runtime_cartesian_switching_param_name = "runtime_cartesian_switching"
     kinematics_params_file_param_name = "kinematics_params_file"
 
     # Declare arguments
@@ -65,8 +66,13 @@ def generate_launch_description():
         DeclareLaunchArgument(
             rdk_control_mode_param_name,
             default_value="joint_position",
-            description="RDK control mode for the ROS 2 control joint position and velocity interfaces. Options: joint_position, joint_impedance",
-            choices=["joint_position", "joint_impedance"],
+            description=(
+                "RDK control mode. joint_position and joint_impedance drive the joint position "
+                "and velocity interfaces; cartesian_motion_force runs Cartesian motion-force "
+                "control for the whole session and expects "
+                "robot_controller:=cartesian_motion_controller."
+            ),
+            choices=["joint_position", "joint_impedance", "cartesian_motion_force"],
         )
     )
 
@@ -121,9 +127,25 @@ def generate_launch_description():
 
     declared_arguments.append(
         DeclareLaunchArgument(
+            runtime_cartesian_switching_param_name,
+            default_value="false",
+            description=(
+                "Prepare Cartesian control at startup so cartesian_motion_controller can take "
+                "command authority at runtime, and load it inactive alongside the joint "
+                "controller. Leave false for joint-only setups."
+            ),
+            choices=["true", "false"],
+        )
+    )
+
+    declared_arguments.append(
+        DeclareLaunchArgument(
             robot_controller_param_name,
             default_value="rizon_arm_controller",
-            description="Robot controller to start. Available: rizon_arm_controller",
+            description=(
+                "Robot controller to start. Available: rizon_arm_controller, "
+                "streaming_position_controller, cartesian_motion_controller"
+            ),
         )
     )
 
@@ -146,6 +168,9 @@ def generate_launch_description():
     use_fake_hardware = LaunchConfiguration(use_fake_hardware_param_name)
     fake_sensor_commands = LaunchConfiguration(fake_sensor_commands_param_name)
     robot_controller = LaunchConfiguration(robot_controller_param_name)
+    runtime_cartesian_switching = LaunchConfiguration(
+        runtime_cartesian_switching_param_name
+    )
     kinematics_params_file = LaunchConfiguration(kinematics_params_file_param_name)
     # Passing an empty path through would reach xacro.load_yaml('') and abort.
     kinematics_xacro_arg = PythonExpression(
@@ -204,6 +229,9 @@ def generate_launch_description():
                 " ",
                 "fake_sensor_commands:=",
                 fake_sensor_commands,
+                " ",
+                "runtime_cartesian_switching:=",
+                runtime_cartesian_switching,
                 " ",
                 kinematics_xacro_arg,
             ]
@@ -361,6 +389,24 @@ def generate_launch_description():
         condition=UnlessCondition(use_fake_hardware),
     )
 
+    # Load the Cartesian controller inactive so it can take command authority from the joint
+    # controller at runtime. Only meaningful when the hardware was started with
+    # runtime_cartesian_switching:=true, which is what prepares the Cartesian mode.
+    cartesian_motion_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        parameters=[ParameterFile(robot_controllers, allow_substs=True)],
+        arguments=[
+            "cartesian_motion_controller",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+            "--inactive",
+        ],
+        condition=IfCondition(runtime_cartesian_switching),
+    )
+
     # Delay start of robot_controller after `joint_state_broadcaster`
     delay_robot_controller_spawner_after_joint_state_broadcaster_spawner = (
         RegisterEventHandler(
@@ -405,6 +451,7 @@ def generate_launch_description():
         joint_state_broadcaster_spawner,
         flexiv_robot_states_broadcaster_spawner,
         gpio_controller_spawner,
+        cartesian_motion_controller_spawner,
         delay_gripper_launch_after_joint_state_broadcaster_spawner,
         delay_robot_controller_spawner_after_joint_state_broadcaster_spawner,
         delay_robot_controller_spawner_after_gripper_ready,

@@ -5,6 +5,16 @@ controller_manager:
     rizon_arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
+    streaming_position_controller:
+      type: streaming_position_controller/StreamingPositionController
+
+    # Spawned inactive when runtime_cartesian_switching is true, so a joint controller can hand
+    # command authority to Cartesian control without restarting the driver. Spawn it active
+    # (robot_controller:=cartesian_motion_controller) together with
+    # rdk_control_mode:=cartesian_motion_force to run Cartesian control for the whole session.
+    cartesian_motion_controller:
+      type: cartesian_motion_controller/CartesianMotionController
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
@@ -34,6 +44,10 @@ rizon_arm_controller:
     constraints:
       stopped_velocity_tolerance: 0.01
       goal_time: 0.0
+
+cartesian_motion_controller:
+  ros__parameters:
+    tcp_name: $(var robot_sn)_tcp
 
 gpio_controller:
   ros__parameters:

@@ -9,12 +9,14 @@
 #ifndef FLEXIV_HARDWARE__FLEXIV_HARDWARE_INTERFACE_HPP_
 #define FLEXIV_HARDWARE__FLEXIV_HARDWARE_INTERFACE_HPP_
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
 // ROS
+#include <rclcpp/rclcpp.hpp>
 #include <rclcpp/clock.hpp>
 #include <rclcpp/duration.hpp>
 #include <rclcpp/macros.hpp>
@@ -28,6 +30,13 @@
 #include <hardware_interface/system_interface.hpp>
 #include <hardware_interface/types/hardware_interface_return_values.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
+
+// Flexiv msgs
+#include "flexiv_msgs/srv/set_cartesian_impedance.hpp"
+#include "flexiv_msgs/srv/set_force_control_axis.hpp"
+#include "flexiv_msgs/srv/set_force_control_frame.hpp"
+#include "flexiv_msgs/srv/set_max_contact_wrench.hpp"
+#include "flexiv_msgs/srv/set_null_space_posture.hpp"
 
 // Flexiv
 #include "flexiv/rdk/robot.hpp"
@@ -44,8 +53,25 @@ enum StoppingInterface
     NONE,
     STOP_POSITION,
     STOP_VELOCITY,
-    STOP_EFFORT
+    STOP_EFFORT,
+    STOP_CARTESIAN
 };
+
+/** Cartesian pose array size: [x, y, z, qw, qx, qy, qz] */
+constexpr size_t kCartPoseSize = 7;
+
+/** Cartesian space degrees of freedom: [Fx, Fy, Fz, Mx, My, Mz] */
+constexpr size_t kCartDoF = 6;
+
+// on_activate() runs on the controller_manager's executor thread, so anything slow here makes
+// /controller_manager services unavailable for that long. Keep the force/torque zeroing retry
+// budget small: the launch files order other RDK clients after activation, so a retry covers a
+// brief race, not a ten-second gripper init.
+constexpr int kZeroFTSensorMaxAttempts = 3;
+constexpr int kZeroFTSensorRetryDelayMs = 500;
+// Upper bound on the ZeroFTSensor primitive, so a primitive that never reports termination cannot
+// wedge activation.
+constexpr int kZeroFTSensorPrimitiveTimeoutMs = 10000;
 
 class FlexivHardwareInterface : public hardware_interface::SystemInterface
 {
@@ -69,6 +95,9 @@ public:
 
     std::vector<hardware_interface::InterfaceDescription>
     export_unlisted_state_interface_descriptions() override;
+
+    std::vector<hardware_interface::InterfaceDescription>
+    export_unlisted_command_interface_descriptions() override;
 
     hardware_interface::return_type prepare_command_mode_switch(
         const std::vector<std::string>& start_interfaces,
@@ -137,6 +166,31 @@ private:
     /** @brief Copy the internal command buffers into the framework's command interfaces. */
     void PushCommandsToInterfaces();
 
+    /**
+     * @brief [Blocking] Zero the force/torque sensor, retrying a few times so that another RDK
+     * client briefly holding the robot does not fail the preparation outright.
+     * @param[out] error Description of the last failure, when this returns false.
+     * @return True if the sensor was zeroed.
+     */
+    bool ZeroFTSensor(std::string& error);
+
+    /**
+     * @brief [Blocking] Prepare Cartesian motion-force control during activation: zero the
+     * force/torque sensor and either enter RT_CARTESIAN_MOTION_FORCE (when the driver is Cartesian
+     * for its whole lifetime) or hand the robot back to IDLE for a later runtime switch.
+     * @return False only when the driver cannot come up at all.
+     */
+    bool PrepareCartesianControl();
+
+    /** @brief Bring up the Cartesian configuration services on the controller manager's executor. */
+    void StartCartesianConfigServices();
+
+    /** @brief Tear down the Cartesian configuration services. */
+    void StopCartesianConfigServices();
+
+    /** @brief True when every Cartesian pose command holds a finite value. */
+    bool IsCartesianCommandValid() const;
+
     // Flexiv RDK
     std::unique_ptr<flexiv::rdk::Robot> robot_;
 
@@ -163,6 +217,14 @@ private:
     std::vector<double> hw_states_joint_velocities_;
     std::vector<double> hw_states_joint_efforts_;
 
+    // Cartesian commands and states, in RDK order: pose is [x, y, z, qw, qx, qy, qz] and the
+    // wrench/velocity/acceleration arrays are [x, y, z, Rx, Ry, Rz].
+    std::array<double, kCartPoseSize> hw_commands_cartesian_pose_;
+    std::array<double, kCartDoF> hw_commands_cartesian_wrench_;
+    std::array<double, kCartDoF> hw_commands_cartesian_velocity_;
+    std::array<double, kCartDoF> hw_commands_cartesian_acceleration_;
+    std::array<double, kCartPoseSize> hw_states_cartesian_pose_;
+
     // Robot States
     flexiv::rdk::RobotStates hw_flexiv_robot_states_;
 
@@ -188,6 +250,9 @@ private:
     std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_gpio_in_;
     std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_gpio_out_;
     hardware_interface::StateInterface::SharedPtr handle_state_flexiv_robot_states_;
+    std::vector<hardware_interface::StateInterface::SharedPtr> handles_state_cartesian_pose_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_cartesian_pose_;
+    std::vector<hardware_interface::CommandInterface::SharedPtr> handles_command_cartesian_wrench_;
 
     // Map from RDK joint index to ROS joint index
     // RDK expects: [ext_axis_1, ..., ext_axis_N, arm_joint_1, ..., arm_joint_7]
@@ -205,6 +270,40 @@ private:
     bool position_controller_running_;
     bool velocity_controller_running_;
     bool torque_controller_running_;
+    bool cartesian_motion_controller_running_;
+    // True once the robot is actually in RT_CARTESIAN_MOTION_FORCE, which write() requires before
+    // streaming any Cartesian command.
+    bool cartesian_mode_active_;
+    // When true, the driver starts in rdk_control_mode_ (a joint mode) but is prepared to enter
+    // RT_CARTESIAN_MOTION_FORCE later, when a controller claiming the tcp/cartesian_pose_*
+    // interfaces is activated. Set from the "runtime_cartesian_switching" hardware parameter.
+    bool runtime_cartesian_switching_;
+    std::array<double, kCartPoseSize> init_tcp_pose_;
+
+    // Cartesian configuration services, hosted on the controller manager's executor alongside the
+    // recovery and joint impedance nodes.
+    rclcpp::Node::SharedPtr cartesian_config_node_;
+    rclcpp::Service<flexiv_msgs::srv::SetCartesianImpedance>::SharedPtr set_cartesian_impedance_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetNullSpacePosture>::SharedPtr set_null_space_posture_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetMaxContactWrench>::SharedPtr set_max_contact_wrench_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetForceControlFrame>::SharedPtr set_force_control_frame_srv_;
+    rclcpp::Service<flexiv_msgs::srv::SetForceControlAxis>::SharedPtr set_force_control_axis_srv_;
+
+    void SetCartesianImpedanceCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Response> response);
+    void SetNullSpacePostureCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Response> response);
+    void SetMaxContactWrenchCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Response> response);
+    void SetForceControlFrameCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Response> response);
+    void SetForceControlAxisCallback(
+        const std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Request> request,
+        std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Response> response);
 };
 
 } /* namespace flexiv_hardware */

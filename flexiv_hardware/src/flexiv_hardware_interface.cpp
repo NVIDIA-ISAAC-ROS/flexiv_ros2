@@ -31,6 +31,29 @@ constexpr double kMaxJointAcceleration = 3.0;
 constexpr std::chrono::seconds kActivationOperationalTimeout {30};
 constexpr std::chrono::milliseconds kOperationalPollPeriod {200};
 
+// Command/state interface names for Cartesian motion-force control, exported under the
+// "<prefix>tcp" interface prefix.
+constexpr const char* kCartesianPoseInterfaces[]
+    = {"cartesian_pose_x", "cartesian_pose_y", "cartesian_pose_z", "cartesian_pose_qw",
+        "cartesian_pose_qx", "cartesian_pose_qy", "cartesian_pose_qz"};
+constexpr const char* kCartesianWrenchInterfaces[] = {"cartesian_wrench_fx", "cartesian_wrench_fy",
+    "cartesian_wrench_fz", "cartesian_wrench_mx", "cartesian_wrench_my", "cartesian_wrench_mz"};
+
+// Mode names used in start_modes_ for the Cartesian interfaces, which have no
+// hardware_interface::HW_IF_* equivalent.
+constexpr const char* kStartModeCartesianPose = "cartesian_pose";
+constexpr const char* kStartModeCartesianWrench = "cartesian_wrench";
+
+hardware_interface::InterfaceDescription CartesianInterfaceDescription(
+    const std::string& tcp_name, const std::string& interface_name)
+{
+    hardware_interface::InterfaceInfo info;
+    info.name = interface_name;
+    info.data_type = "double";
+    info.enable_limits = false;
+    return hardware_interface::InterfaceDescription(tcp_name, info);
+}
+
 }
 
 namespace flexiv_hardware {
@@ -63,7 +86,19 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
     position_controller_running_ = false;
     velocity_controller_running_ = false;
     torque_controller_running_ = false;
+    cartesian_motion_controller_running_ = false;
+    cartesian_mode_active_ = false;
+    runtime_cartesian_switching_ = false;
     controllers_initialized_ = false;
+
+    // A NaN pose command means "no Cartesian setpoint yet", which write() holds the initial TCP
+    // pose against. The wrench defaults to zero, i.e. pure motion control.
+    hw_commands_cartesian_pose_.fill(std::numeric_limits<double>::quiet_NaN());
+    hw_commands_cartesian_wrench_.fill(0.0);
+    hw_commands_cartesian_velocity_.fill(0.0);
+    hw_commands_cartesian_acceleration_.fill(0.0);
+    hw_states_cartesian_pose_.fill(std::numeric_limits<double>::quiet_NaN());
+    init_tcp_pose_.fill(0.0);
 
     if (info_.joints.size() < 7) {
         RCLCPP_FATAL(getLogger(), "Got %ld joints. Expected at least 7.", info_.joints.size());
@@ -188,16 +223,31 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_init(
             rdk_control_mode_ = flexiv::rdk::Mode::NRT_JOINT_POSITION;
         } else if (rdk_control_mode_str == "joint_impedance") {
             rdk_control_mode_ = flexiv::rdk::Mode::NRT_JOINT_IMPEDANCE;
+        } else if (rdk_control_mode_str == "cartesian_motion_force") {
+            rdk_control_mode_ = flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE;
         } else {
             RCLCPP_FATAL(getLogger(),
                 "Parameter 'rdk_control_mode' has invalid value '%s'. Options: joint_position, "
-                "joint_impedance",
+                "joint_impedance, cartesian_motion_force",
                 rdk_control_mode_str.c_str());
             return hardware_interface::CallbackReturn::ERROR;
         }
     } catch (const std::out_of_range& ex) {
         RCLCPP_FATAL(getLogger(), "Parameter 'rdk_control_mode' not set");
         return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    // Optional: come up in a joint mode but stay ready to hand the robot over to the Cartesian
+    // controller at runtime, for workflows that plan a joint trajectory and then switch to a
+    // task-space policy without restarting the driver.
+    if (info_.hardware_parameters.count("runtime_cartesian_switching") > 0) {
+        const auto& value = info_.hardware_parameters.at("runtime_cartesian_switching");
+        runtime_cartesian_switching_ = (value == "true" || value == "True" || value == "1");
+    }
+    if (runtime_cartesian_switching_
+        && rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        // Already Cartesian for the whole session; there is nothing to switch into later.
+        runtime_cartesian_switching_ = false;
     }
 
     // The connection is established in on_configure, which is the lifecycle stage that owns
@@ -337,6 +387,7 @@ void FlexivHardwareInterface::Disconnect()
         }
         joint_impedance_config_node_.reset();
     }
+    StopCartesianConfigServices();
     robot_system_control_.reset();
     robot_.reset();
     if (driver_status_) {
@@ -391,8 +442,36 @@ FlexivHardwareInterface::export_unlisted_state_interface_descriptions()
     states_info.data_type = "double";
     states_info.enable_limits = false;
 
-    return {hardware_interface::InterfaceDescription(
-        info_.hardware_parameters.at("robot_sn"), states_info)};
+    std::vector<hardware_interface::InterfaceDescription> descriptions {
+        hardware_interface::InterfaceDescription(
+            info_.hardware_parameters.at("robot_sn"), states_info)};
+
+    // The measured TCP pose is exported for every driver, whatever control mode it runs in, so
+    // that a task-space consumer can read it without claiming a command interface.
+    const std::string tcp_name = info_.hardware_parameters.at("prefix") + "tcp";
+    for (const auto& interface_name : kCartesianPoseInterfaces) {
+        descriptions.push_back(CartesianInterfaceDescription(tcp_name, interface_name));
+    }
+
+    return descriptions;
+}
+
+std::vector<hardware_interface::InterfaceDescription>
+FlexivHardwareInterface::export_unlisted_command_interface_descriptions()
+{
+    // Declared here rather than in the URDF, because they belong to the hardware rather than to
+    // any joint, and because a description that never mentions them still has to work.
+    std::vector<hardware_interface::InterfaceDescription> descriptions;
+
+    const std::string tcp_name = info_.hardware_parameters.at("prefix") + "tcp";
+    for (const auto& interface_name : kCartesianPoseInterfaces) {
+        descriptions.push_back(CartesianInterfaceDescription(tcp_name, interface_name));
+    }
+    for (const auto& interface_name : kCartesianWrenchInterfaces) {
+        descriptions.push_back(CartesianInterfaceDescription(tcp_name, interface_name));
+    }
+
+    return descriptions;
 }
 
 bool FlexivHardwareInterface::ResolveInterfaceHandles()
@@ -405,6 +484,9 @@ bool FlexivHardwareInterface::ResolveInterfaceHandles()
     handles_command_joint_efforts_.clear();
     handles_state_gpio_in_.clear();
     handles_command_gpio_out_.clear();
+    handles_state_cartesian_pose_.clear();
+    handles_command_cartesian_pose_.clear();
+    handles_command_cartesian_wrench_.clear();
 
     handles_state_joint_positions_.reserve(info_.joints.size());
     handles_state_joint_velocities_.reserve(info_.joints.size());
@@ -445,6 +527,18 @@ bool FlexivHardwareInterface::ResolveInterfaceHandles()
 
         handle_state_flexiv_robot_states_ = get_state_interface_handle(
             info_.hardware_parameters.at("robot_sn") + "/flexiv_robot_states");
+
+        const std::string tcp_name = prefix + "tcp";
+        for (const auto& interface_name : kCartesianPoseInterfaces) {
+            handles_state_cartesian_pose_.push_back(
+                get_state_interface_handle(tcp_name + "/" + interface_name));
+            handles_command_cartesian_pose_.push_back(
+                get_command_interface_handle(tcp_name + "/" + interface_name));
+        }
+        for (const auto& interface_name : kCartesianWrenchInterfaces) {
+            handles_command_cartesian_wrench_.push_back(
+                get_command_interface_handle(tcp_name + "/" + interface_name));
+        }
     } catch (const std::exception& ex) {
         RCLCPP_FATAL(getLogger(), "Could not resolve interface handles: %s", ex.what());
         return false;
@@ -471,6 +565,10 @@ void FlexivHardwareInterface::PublishStatesToInterfaces()
         std::ignore
             = set_state(handles_state_gpio_in_[i], hw_states_gpio_in_[i], /*wait_until_set=*/false);
     }
+    for (std::size_t i = 0; i < handles_state_cartesian_pose_.size(); i++) {
+        std::ignore = set_state(handles_state_cartesian_pose_[i], hw_states_cartesian_pose_[i],
+            /*wait_until_set=*/false);
+    }
 }
 
 void FlexivHardwareInterface::PushCommandsToInterfaces()
@@ -482,6 +580,14 @@ void FlexivHardwareInterface::PushCommandsToInterfaces()
             hw_commands_joint_velocities_[i], /*wait_until_set=*/true);
         std::ignore = set_command(handles_command_joint_efforts_[i], hw_commands_joint_efforts_[i],
             /*wait_until_set=*/true);
+    }
+    for (std::size_t i = 0; i < handles_command_cartesian_pose_.size(); i++) {
+        std::ignore = set_command(handles_command_cartesian_pose_[i],
+            hw_commands_cartesian_pose_[i], /*wait_until_set=*/true);
+    }
+    for (std::size_t i = 0; i < handles_command_cartesian_wrench_.size(); i++) {
+        std::ignore = set_command(handles_command_cartesian_wrench_[i],
+            hw_commands_cartesian_wrench_[i], /*wait_until_set=*/true);
     }
 }
 
@@ -501,6 +607,14 @@ void FlexivHardwareInterface::ReadCommandsFromInterfaces()
     for (std::size_t i = 0; i < handles_command_gpio_out_.size(); i++) {
         std::ignore = get_command(
             handles_command_gpio_out_[i], hw_commands_gpio_out_[i], /*wait_until_get=*/false);
+    }
+    for (std::size_t i = 0; i < handles_command_cartesian_pose_.size(); i++) {
+        std::ignore = get_command(handles_command_cartesian_pose_[i],
+            hw_commands_cartesian_pose_[i], /*wait_until_get=*/false);
+    }
+    for (std::size_t i = 0; i < handles_command_cartesian_wrench_.size(); i++) {
+        std::ignore = get_command(handles_command_cartesian_wrench_[i],
+            hw_commands_cartesian_wrench_[i], /*wait_until_get=*/false);
     }
 }
 
@@ -577,6 +691,16 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
         return hardware_interface::CallbackReturn::ERROR;
     }
 
+    // Cartesian control is prepared here, at activation, before the 1 kHz loop is running. Zeroing
+    // the force/torque sensor executes a primitive that takes seconds, so it must never run from
+    // perform_command_mode_switch().
+    if (rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE
+        || runtime_cartesian_switching_) {
+        if (!PrepareCartesianControl()) {
+            return hardware_interface::CallbackReturn::ERROR;
+        }
+    }
+
     // The robot is enabled but in IDLE: a controller start has to establish the control mode and
     // synchronize the command buffers before any motion may be streamed.
     driver_status_->commands_synchronized.store(false);
@@ -587,6 +711,172 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_activate(
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
+bool FlexivHardwareInterface::ZeroFTSensor(std::string& error)
+{
+    // Other RDK clients contend for the robot at activation -- flexiv_gripper's Gripper::Init takes
+    // about ten seconds and makes SwitchMode fail while it is in flight -- so retry instead of
+    // giving up on the first refusal.
+    for (int attempt = 1; attempt <= kZeroFTSensorMaxAttempts; ++attempt) {
+        try {
+            robot_->SwitchMode(flexiv::rdk::Mode::NRT_PRIMITIVE_EXECUTION);
+            robot_->ExecutePrimitive(
+                "ZeroFTSensor", std::map<std::string, flexiv::rdk::FlexivDataTypes> {});
+
+            // Wait for the primitive to finish, bounded so that a primitive which never terminates
+            // cannot hold the executor thread indefinitely.
+            int waited_ms = 0;
+            while (!std::get<int>(robot_->primitive_states()["terminated"])) {
+                if (waited_ms >= kZeroFTSensorPrimitiveTimeoutMs) {
+                    throw std::runtime_error("ZeroFTSensor primitive did not terminate");
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                waited_ms += 100;
+            }
+            RCLCPP_INFO(getLogger(), "Sensor zeroing complete");
+            return true;
+        } catch (const std::exception& e) {
+            error = e.what();
+            RCLCPP_WARN(getLogger(), "Force/torque sensor zeroing attempt %d of %d failed: %s",
+                attempt, kZeroFTSensorMaxAttempts, error.c_str());
+            if (attempt < kZeroFTSensorMaxAttempts) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kZeroFTSensorRetryDelayMs));
+            }
+        }
+    }
+    return false;
+}
+
+bool FlexivHardwareInterface::PrepareCartesianControl()
+{
+    // Zeroing is only valid while the robot is parked and empty-handed, which is why it happens
+    // once here rather than at every mode switch.
+    RCLCPP_WARN(getLogger(),
+        "Zeroing force/torque sensor. Make sure nothing is in contact with the robot.");
+
+    const bool cartesian_from_start
+        = (rdk_control_mode_ == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+
+    std::string zeroing_error;
+    if (!ZeroFTSensor(zeroing_error)) {
+        if (cartesian_from_start) {
+            // Cartesian is the only mode this driver has; there is nothing to fall back to.
+            RCLCPP_FATAL(
+                getLogger(), "Failed to zero force/torque sensor: %s", zeroing_error.c_str());
+            return false;
+        }
+        // Joint control is unaffected, so come up anyway and only give up the Cartesian handover.
+        // Clearing the flag makes perform_command_mode_switch() refuse the switch later rather
+        // than command Cartesian against a sensor that was never zeroed.
+        RCLCPP_ERROR(getLogger(),
+            "Failed to zero force/torque sensor: %s. Runtime Cartesian switching is disabled; the "
+            "driver continues in its joint mode.",
+            zeroing_error.c_str());
+        runtime_cartesian_switching_ = false;
+        try {
+            robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
+        } catch (const std::exception& e) {
+            RCLCPP_FATAL(getLogger(), "Failed to return the robot to IDLE: %s", e.what());
+            return false;
+        }
+        return true;
+    }
+
+    try {
+        init_tcp_pose_ = robot_->states().tcp_pose;
+        if (cartesian_from_start) {
+            robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+            robot_->SetForceControlAxis(
+                std::array<bool, kCartDoF> {false, false, false, false, false, false});
+            cartesian_mode_active_ = true;
+            RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
+        } else {
+            // Leave the robot IDLE, which is how activation ends when no zeroing runs. Other RDK
+            // clients need it: flexiv_gripper's Tool::Switch fails with "Robot is not in IDLE mode"
+            // against any control mode. perform_command_mode_switch() sets the control mode when
+            // the first controller is activated.
+            robot_->SwitchMode(flexiv::rdk::Mode::IDLE);
+            RCLCPP_INFO(getLogger(),
+                "Cartesian mode prepared; runtime switching to RT_CARTESIAN_MOTION_FORCE is "
+                "enabled");
+        }
+    } catch (const std::exception& e) {
+        RCLCPP_FATAL(getLogger(), "Could not prepare Cartesian control: %s", e.what());
+        return false;
+    }
+
+    RCLCPP_INFO(getLogger(), "Initial TCP pose: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+        init_tcp_pose_[0], init_tcp_pose_[1], init_tcp_pose_[2], init_tcp_pose_[3],
+        init_tcp_pose_[4], init_tcp_pose_[5], init_tcp_pose_[6]);
+
+    StartCartesianConfigServices();
+
+    return true;
+}
+
+void FlexivHardwareInterface::StartCartesianConfigServices()
+{
+    auto executor = executor_.lock();
+    if (!executor) {
+        RCLCPP_ERROR(getLogger(),
+            "No executor available to host the Cartesian configuration services. Cartesian control "
+            "runs, but its impedance and force-control settings cannot be changed at runtime.");
+        return;
+    }
+
+    std::string node_name = info_.hardware_parameters.at("prefix");
+    std::replace(node_name.begin(), node_name.end(), '-', '_');
+    node_name += "flexiv_cartesian_config";
+
+    cartesian_config_node_ = rclcpp::Node::make_shared(node_name);
+
+    set_cartesian_impedance_srv_
+        = cartesian_config_node_->create_service<flexiv_msgs::srv::SetCartesianImpedance>(
+            "~/set_cartesian_impedance",
+            std::bind(&FlexivHardwareInterface::SetCartesianImpedanceCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
+    set_null_space_posture_srv_
+        = cartesian_config_node_->create_service<flexiv_msgs::srv::SetNullSpacePosture>(
+            "~/set_null_space_posture",
+            std::bind(&FlexivHardwareInterface::SetNullSpacePostureCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
+    set_max_contact_wrench_srv_
+        = cartesian_config_node_->create_service<flexiv_msgs::srv::SetMaxContactWrench>(
+            "~/set_max_contact_wrench",
+            std::bind(&FlexivHardwareInterface::SetMaxContactWrenchCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
+    set_force_control_frame_srv_
+        = cartesian_config_node_->create_service<flexiv_msgs::srv::SetForceControlFrame>(
+            "~/set_force_control_frame",
+            std::bind(&FlexivHardwareInterface::SetForceControlFrameCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
+    set_force_control_axis_srv_
+        = cartesian_config_node_->create_service<flexiv_msgs::srv::SetForceControlAxis>(
+            "~/set_force_control_axis",
+            std::bind(&FlexivHardwareInterface::SetForceControlAxisCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
+
+    executor->add_node(cartesian_config_node_->get_node_base_interface());
+
+    RCLCPP_INFO(getLogger(), "Cartesian configuration services available under /%s",
+        cartesian_config_node_->get_name());
+}
+
+void FlexivHardwareInterface::StopCartesianConfigServices()
+{
+    if (!cartesian_config_node_) {
+        return;
+    }
+    if (auto executor = executor_.lock()) {
+        executor->remove_node(cartesian_config_node_->get_node_base_interface());
+    }
+    set_cartesian_impedance_srv_.reset();
+    set_null_space_posture_srv_.reset();
+    set_max_contact_wrench_srv_.reset();
+    set_force_control_frame_srv_.reset();
+    set_force_control_axis_srv_.reset();
+    cartesian_config_node_.reset();
+}
+
 hardware_interface::CallbackReturn FlexivHardwareInterface::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/)
 {
@@ -595,6 +885,10 @@ hardware_interface::CallbackReturn FlexivHardwareInterface::on_deactivate(
     // Hold off write() before stopping, so the real-time loop cannot stream a command into a robot
     // that is being brought to a halt.
     driver_status_->driver_state.store(DriverState::FAULT);
+
+    StopCartesianConfigServices();
+    cartesian_mode_active_ = false;
+    cartesian_motion_controller_running_ = false;
 
     try {
         StopIfOperational();
@@ -639,6 +933,9 @@ hardware_interface::return_type FlexivHardwareInterface::read(
                 hw_states_joint_efforts_[ros_idx] = hw_flexiv_robot_states_.tau[rdk_idx];
             }
         }
+
+        // Read the measured TCP pose, in the RDK's [x, y, z, qw, qx, qy, qz] order
+        hw_states_cartesian_pose_ = hw_flexiv_robot_states_.tcp_pose;
 
         // Read GPIO input states
         auto gpio_in = robot_->digital_inputs();
@@ -717,6 +1014,18 @@ hardware_interface::return_type FlexivHardwareInterface::write(
             target_torque[rdk_idx] = hw_commands_joint_efforts_[ros_idx];
         }
         robot_->StreamJointTorque(target_torque, true, true);
+    } else if (stream_motion && cartesian_mode_active_
+               && robot_->mode() == flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        if (cartesian_motion_controller_running_ && IsCartesianCommandValid()) {
+            robot_->StreamCartesianMotionForce(hw_commands_cartesian_pose_,
+                hw_commands_cartesian_wrench_, hw_commands_cartesian_velocity_,
+                hw_commands_cartesian_acceleration_);
+        } else {
+            // RT_CARTESIAN_MOTION_FORCE needs a command every cycle, so hold the pose the mode was
+            // entered at until the controller publishes its first setpoint.
+            const std::array<double, kCartDoF> zero_wrench {};
+            robot_->StreamCartesianMotionForce(init_tcp_pose_, zero_wrench);
+        }
     }
 
     // Write digital output
@@ -764,6 +1073,13 @@ void FlexivHardwareInterface::SynchronizeCommandsWithState()
     std::fill(hw_commands_joint_efforts_.begin(), hw_commands_joint_efforts_.end(),
         std::numeric_limits<double>::quiet_NaN());
 
+    // Cartesian pose commands follow the same rule as efforts: NaN means "no setpoint yet", which
+    // write() answers by holding init_tcp_pose_ instead of a stale pose from a previous session.
+    hw_commands_cartesian_pose_.fill(std::numeric_limits<double>::quiet_NaN());
+    hw_commands_cartesian_wrench_.fill(0.0);
+    hw_commands_cartesian_velocity_.fill(0.0);
+    hw_commands_cartesian_acceleration_.fill(0.0);
+
     // The command buffers no longer alias the framework's interface storage, so the synchronized
     // values have to be pushed across explicitly. Called off the real-time path, so this waits for
     // the lock.
@@ -776,6 +1092,8 @@ hardware_interface::return_type FlexivHardwareInterface::prepare_command_mode_sw
 {
     start_modes_.clear();
     stop_modes_.clear();
+
+    const std::string tcp_name = info_.hardware_parameters.at("prefix") + "tcp";
 
     // Starting interfaces
     for (const auto& key : start_interfaces) {
@@ -790,13 +1108,42 @@ hardware_interface::return_type FlexivHardwareInterface::prepare_command_mode_sw
                 start_modes_.push_back(hardware_interface::HW_IF_EFFORT);
             }
         }
+        for (const auto& interface_name : kCartesianPoseInterfaces) {
+            if (key == tcp_name + "/" + interface_name) {
+                start_modes_.push_back(kStartModeCartesianPose);
+            }
+        }
+        for (const auto& interface_name : kCartesianWrenchInterfaces) {
+            if (key == tcp_name + "/" + interface_name) {
+                start_modes_.push_back(kStartModeCartesianWrench);
+            }
+        }
     }
+
+    // A Cartesian controller claims all seven pose interfaces, and optionally all six wrench
+    // interfaces; a partial claim would leave write() streaming a half-specified target.
+    const auto cartesian_pose_count
+        = std::count(start_modes_.begin(), start_modes_.end(), kStartModeCartesianPose);
+    const auto cartesian_wrench_count
+        = std::count(start_modes_.begin(), start_modes_.end(), kStartModeCartesianWrench);
+    if (cartesian_pose_count > 0 && static_cast<size_t>(cartesian_pose_count) != kCartPoseSize) {
+        RCLCPP_ERROR(getLogger(), "All Cartesian pose interfaces must be claimed together");
+        return hardware_interface::return_type::ERROR;
+    }
+    if (cartesian_wrench_count > 0 && static_cast<size_t>(cartesian_wrench_count) != kCartDoF) {
+        RCLCPP_ERROR(getLogger(), "All Cartesian wrench interfaces must be claimed together");
+        return hardware_interface::return_type::ERROR;
+    }
+
+    const size_t joint_start_count
+        = start_modes_.size() - static_cast<size_t>(cartesian_pose_count + cartesian_wrench_count);
+
     // All joints must be given new command mode at the same time
-    if (start_modes_.size() != 0 && start_modes_.size() != info_.joints.size()) {
+    if (joint_start_count != 0 && joint_start_count != info_.joints.size()) {
         return hardware_interface::return_type::ERROR;
     }
     // All joints must have the same command mode
-    if (start_modes_.size() != 0
+    if (joint_start_count != 0 && cartesian_pose_count == 0 && cartesian_wrench_count == 0
         && !std::equal(start_modes_.begin() + 1, start_modes_.end(), start_modes_.begin())) {
         return hardware_interface::return_type::ERROR;
     }
@@ -814,11 +1161,27 @@ hardware_interface::return_type FlexivHardwareInterface::prepare_command_mode_sw
                 stop_modes_.push_back(StoppingInterface::STOP_EFFORT);
             }
         }
+        for (const auto& interface_name : kCartesianPoseInterfaces) {
+            if (key == tcp_name + "/" + interface_name) {
+                stop_modes_.push_back(StoppingInterface::STOP_CARTESIAN);
+            }
+        }
+        for (const auto& interface_name : kCartesianWrenchInterfaces) {
+            if (key == tcp_name + "/" + interface_name) {
+                stop_modes_.push_back(StoppingInterface::STOP_CARTESIAN);
+            }
+        }
     }
+
+    const auto cartesian_stop_count
+        = std::count(stop_modes_.begin(), stop_modes_.end(), StoppingInterface::STOP_CARTESIAN);
+    const size_t joint_stop_count = stop_modes_.size() - static_cast<size_t>(cartesian_stop_count);
+
     // stop all interfaces at the same time
-    if (stop_modes_.size() != 0
-        && (stop_modes_.size() != info_.joints.size()
-            || !std::equal(stop_modes_.begin() + 1, stop_modes_.end(), stop_modes_.begin()))) {
+    if (joint_stop_count != 0
+        && (joint_stop_count != info_.joints.size()
+            || (cartesian_stop_count == 0
+                && !std::equal(stop_modes_.begin() + 1, stop_modes_.end(), stop_modes_.begin())))) {
         return hardware_interface::return_type::ERROR;
     }
 
@@ -846,6 +1209,14 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
                       != stop_modes_.end()) {
         torque_controller_running_ = false;
         StopIfOperational();
+    } else if (stop_modes_.size() != 0
+               && std::find(
+                      stop_modes_.begin(), stop_modes_.end(), StoppingInterface::STOP_CARTESIAN)
+                      != stop_modes_.end()) {
+        cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
+        StopIfOperational();
     }
 
     if (start_modes_.size() != 0
@@ -853,6 +1224,9 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
                != start_modes_.end()) {
         velocity_controller_running_ = false;
         torque_controller_running_ = false;
+        cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints before user commands arrives
         SynchronizeCommandsWithState();
@@ -878,6 +1252,9 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
                       != start_modes_.end()) {
         position_controller_running_ = false;
         torque_controller_running_ = false;
+        cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints before user commands arrives
         SynchronizeCommandsWithState();
@@ -903,6 +1280,9 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
                       != start_modes_.end()) {
         position_controller_running_ = false;
         velocity_controller_running_ = false;
+        cartesian_motion_controller_running_ = false;
+        // Leaving Cartesian control; gate the Cartesian write() path off again.
+        cartesian_mode_active_ = false;
 
         // Hold joints when starting joint torque controller before user
         // commands arrives
@@ -920,12 +1300,224 @@ hardware_interface::return_type FlexivHardwareInterface::perform_command_mode_sw
         }
 
         torque_controller_running_ = true;
+    } else if (start_modes_.size() != 0
+               && std::find(start_modes_.begin(), start_modes_.end(), kStartModeCartesianPose)
+                      != start_modes_.end()) {
+        position_controller_running_ = false;
+        velocity_controller_running_ = false;
+        torque_controller_running_ = false;
+
+        // Hold the current TCP pose until the controller publishes its first setpoint.
+        init_tcp_pose_ = robot_->states().tcp_pose;
+        SynchronizeCommandsWithState();
+
+        // Enter Cartesian mode if the driver was started in a joint mode. Without this, write()
+        // drops every Cartesian command, because it requires both cartesian_mode_active_ and
+        // robot_->mode() == RT_CARTESIAN_MOTION_FORCE. The joint branches above switch modes here
+        // in the same way; the RDK transition blocks this update cycle, which shows up as a single
+        // missed deadline on the 1 kHz loop at the moment of the switch.
+        if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+            if (!runtime_cartesian_switching_) {
+                RCLCPP_ERROR(getLogger(),
+                    "Cartesian controller activated but the hardware was started in a joint mode "
+                    "without runtime_cartesian_switching=true. Refusing to switch: the "
+                    "force/torque sensor has not been zeroed for Cartesian control.");
+                driver_status_->commands_synchronized.store(false);
+                start_modes_.clear();
+                stop_modes_.clear();
+                return hardware_interface::return_type::ERROR;
+            }
+            robot_->SwitchMode(flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE);
+            robot_->SetForceControlAxis(
+                std::array<bool, kCartDoF> {false, false, false, false, false, false});
+            RCLCPP_INFO(getLogger(), "Switched to RT_CARTESIAN_MOTION_FORCE mode");
+        }
+        cartesian_mode_active_ = true;
+
+        // The joint impedance properties do not govern RT_CARTESIAN_MOTION_FORCE, so what the
+        // driver holds is no longer in effect while the Cartesian controller runs.
+        if (joint_impedance_config_node_) {
+            joint_impedance_config_node_->MarkNotInEffect();
+        }
+
+        RCLCPP_INFO(getLogger(),
+            "Cartesian motion controller activated. Initial TCP pose: [%.4f, %.4f, %.4f, %.4f, "
+            "%.4f, %.4f, %.4f]",
+            init_tcp_pose_[0], init_tcp_pose_[1], init_tcp_pose_[2], init_tcp_pose_[3],
+            init_tcp_pose_[4], init_tcp_pose_[5], init_tcp_pose_[6]);
+
+        cartesian_motion_controller_running_ = true;
     }
 
     start_modes_.clear();
     stop_modes_.clear();
 
     return hardware_interface::return_type::OK;
+}
+
+bool FlexivHardwareInterface::IsCartesianCommandValid() const
+{
+    for (size_t i = 0; i < kCartPoseSize; i++) {
+        if (std::isnan(hw_commands_cartesian_pose_[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void FlexivHardwareInterface::SetCartesianImpedanceCallback(
+    const std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Request> request,
+    std::shared_ptr<flexiv_msgs::srv::SetCartesianImpedance::Response> response)
+{
+    if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        response->success = false;
+        response->message = "Robot is not in Cartesian motion-force control mode";
+        return;
+    }
+
+    try {
+        std::array<double, kCartDoF> stiffness;
+        std::array<double, kCartDoF> damping_ratio;
+        for (size_t i = 0; i < kCartDoF; i++) {
+            stiffness[i] = request->stiffness[i];
+            damping_ratio[i] = request->damping_ratio[i];
+        }
+
+        robot_->SetCartesianImpedance(stiffness, damping_ratio);
+
+        response->success = true;
+        response->message = "Cartesian impedance set successfully";
+        RCLCPP_INFO(getLogger(),
+            "SetCartesianImpedance: stiffness=[%.1f, %.1f, %.1f, %.1f, %.1f, %.1f]", stiffness[0],
+            stiffness[1], stiffness[2], stiffness[3], stiffness[4], stiffness[5]);
+    } catch (const std::exception& e) {
+        response->success = false;
+        response->message = std::string("Failed to set Cartesian impedance: ") + e.what();
+        RCLCPP_ERROR(getLogger(), "%s", response->message.c_str());
+    }
+}
+
+void FlexivHardwareInterface::SetNullSpacePostureCallback(
+    const std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Request> request,
+    std::shared_ptr<flexiv_msgs::srv::SetNullSpacePosture::Response> response)
+{
+    if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        response->success = false;
+        response->message = "Robot is not in Cartesian motion-force control mode";
+        return;
+    }
+
+    try {
+        const std::vector<double> ref_positions(
+            request->ref_positions.begin(), request->ref_positions.end());
+
+        robot_->SetNullSpacePosture(ref_positions);
+
+        response->success = true;
+        response->message = "Null space posture set successfully";
+        RCLCPP_INFO(getLogger(), "SetNullSpacePosture: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+            ref_positions[0], ref_positions[1], ref_positions[2], ref_positions[3],
+            ref_positions[4], ref_positions[5], ref_positions[6]);
+    } catch (const std::exception& e) {
+        response->success = false;
+        response->message = std::string("Failed to set null space posture: ") + e.what();
+        RCLCPP_ERROR(getLogger(), "%s", response->message.c_str());
+    }
+}
+
+void FlexivHardwareInterface::SetMaxContactWrenchCallback(
+    const std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Request> request,
+    std::shared_ptr<flexiv_msgs::srv::SetMaxContactWrench::Response> response)
+{
+    if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        response->success = false;
+        response->message = "Robot is not in Cartesian motion-force control mode";
+        return;
+    }
+
+    try {
+        std::array<double, kCartDoF> max_wrench;
+        for (size_t i = 0; i < kCartDoF; i++) {
+            max_wrench[i] = request->max_wrench[i];
+        }
+
+        robot_->SetMaxContactWrench(max_wrench);
+
+        response->success = true;
+        response->message = "Max contact wrench set successfully";
+        RCLCPP_INFO(getLogger(), "SetMaxContactWrench: [%.1f, %.1f, %.1f, %.1f, %.1f, %.1f]",
+            max_wrench[0], max_wrench[1], max_wrench[2], max_wrench[3], max_wrench[4],
+            max_wrench[5]);
+    } catch (const std::exception& e) {
+        response->success = false;
+        response->message = std::string("Failed to set max contact wrench: ") + e.what();
+        RCLCPP_ERROR(getLogger(), "%s", response->message.c_str());
+    }
+}
+
+void FlexivHardwareInterface::SetForceControlFrameCallback(
+    const std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Request> request,
+    std::shared_ptr<flexiv_msgs::srv::SetForceControlFrame::Response> response)
+{
+    if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        response->success = false;
+        response->message = "Robot is not in Cartesian motion-force control mode";
+        return;
+    }
+
+    try {
+        flexiv::rdk::CoordType frame;
+        if (request->frame == "world" || request->frame == "WORLD") {
+            frame = flexiv::rdk::CoordType::WORLD;
+        } else if (request->frame == "tcp" || request->frame == "TCP") {
+            frame = flexiv::rdk::CoordType::TCP;
+        } else {
+            response->success = false;
+            response->message = "Invalid frame. Use 'world' or 'tcp'";
+            return;
+        }
+
+        robot_->SetForceControlFrame(frame);
+
+        response->success = true;
+        response->message = "Force control frame set to: " + request->frame;
+        RCLCPP_INFO(getLogger(), "SetForceControlFrame: %s", request->frame.c_str());
+    } catch (const std::exception& e) {
+        response->success = false;
+        response->message = std::string("Failed to set force control frame: ") + e.what();
+        RCLCPP_ERROR(getLogger(), "%s", response->message.c_str());
+    }
+}
+
+void FlexivHardwareInterface::SetForceControlAxisCallback(
+    const std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Request> request,
+    std::shared_ptr<flexiv_msgs::srv::SetForceControlAxis::Response> response)
+{
+    if (robot_->mode() != flexiv::rdk::Mode::RT_CARTESIAN_MOTION_FORCE) {
+        response->success = false;
+        response->message = "Robot is not in Cartesian motion-force control mode";
+        return;
+    }
+
+    try {
+        std::array<bool, kCartDoF> force_axes;
+        for (size_t i = 0; i < kCartDoF; i++) {
+            force_axes[i] = request->enable_force_control[i];
+        }
+
+        robot_->SetForceControlAxis(force_axes);
+
+        response->success = true;
+        response->message = "Force control axes set successfully";
+        RCLCPP_INFO(getLogger(), "SetForceControlAxis: [%s, %s, %s, %s, %s, %s]",
+            force_axes[0] ? "force" : "motion", force_axes[1] ? "force" : "motion",
+            force_axes[2] ? "force" : "motion", force_axes[3] ? "force" : "motion",
+            force_axes[4] ? "force" : "motion", force_axes[5] ? "force" : "motion");
+    } catch (const std::exception& e) {
+        response->success = false;
+        response->message = std::string("Failed to set force control axes: ") + e.what();
+        RCLCPP_ERROR(getLogger(), "%s", response->message.c_str());
+    }
 }
 
 } /* namespace flexiv_hardware */

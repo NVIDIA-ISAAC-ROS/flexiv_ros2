@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>streaming_position_controller</name>
+  <version>1.9.4</version>
+  <description>
+    Lightweight ros2_control controller that accepts sensor_msgs/JointState
+    on a topic and forwards joint positions to the hardware command interface
+    with configurable velocity clamping to prevent torque limit faults.
+  </description>
+  <maintainer email="support@flexiv.com">Flexiv</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>realtime_tools</depend>
+  <depend>sensor_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,6 @@
+# Set which Cartesian axes are force-controlled (true) or motion-controlled (false)
+# Order: [Fx, Fy, Fz, Mx, My, Mz]
+bool[6] enable_force_control
+---
+bool success
+string message

@@ -6,7 +6,9 @@
  * @author Flexiv
  */
 
+#include <algorithm>
 #include <bit>
+#include <cmath>
 #include <tuple>
 #include <vector>
 #include <string>

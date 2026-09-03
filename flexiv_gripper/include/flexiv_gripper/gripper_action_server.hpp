@@ -15,7 +15,7 @@
 #include <thread>
 
 // ROS
-#include "control_msgs/action/gripper_command.hpp"
+#include "control_msgs/action/parallel_gripper_command.hpp"
 #include "flexiv_msgs/action/grasp.hpp"
 #include "flexiv_msgs/action/move.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -81,7 +81,7 @@ public:
     using Move = flexiv_msgs::action::Move;
     using GoalHandleMove = rclcpp_action::ServerGoalHandle<Move>;
 
-    using GripperCommand = control_msgs::action::GripperCommand;
+    using GripperCommand = control_msgs::action::ParallelGripperCommand;
     using GoalHandleGripperCommand = rclcpp_action::ServerGoalHandle<GripperCommand>;
 
     using Trigger = std_srvs::srv::Trigger;
@@ -199,9 +199,17 @@ private:
 
     /**
      * @brief Resolve the effective max force for a GripperCommand goal. Goals with
-     * max_effort <= 0 fall back to kDefaultMaxForce.
+     * effort <= 0 fall back to kDefaultMaxForce.
      */
     static double EffectiveMaxForce(double command_max_effort);
+
+    /**
+     * @brief Populate a JointState with the gripper's width and force.
+     * ParallelGripperCommand reports result and feedback as a JointState rather
+     * than scalar position/effort fields.
+     */
+    void FillGripperState(
+        sensor_msgs::msg::JointState& state, const flexiv::rdk::GripperStates& states) const;
 
     /**
      * @brief Execute the gripper command and return the result.

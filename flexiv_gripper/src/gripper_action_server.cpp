@@ -218,15 +218,35 @@ double GripperActionServer::EffectiveMaxForce(double command_max_effort)
     return command_max_effort > 0.0 ? command_max_effort : kDefaultMaxForce;
 }
 
+void GripperActionServer::FillGripperState(
+    sensor_msgs::msg::JointState& state, const flexiv::rdk::GripperStates& states) const
+{
+    state.header.stamp = this->now();
+    state.name = {this->gripper_joint_names_.empty() ? std::string()
+                                                     : this->gripper_joint_names_[0]};
+    state.position = {states.width};
+    state.velocity = {0.0};
+    state.effort = {states.force};
+}
+
 void GripperActionServer::ExecuteGripperCommand(
     const std::shared_ptr<GoalHandleGripperCommand>& goal_handle)
 {
     const auto goal = goal_handle->get_goal();
-    const double target_width = goal->command.position;
-    const double max_force = EffectiveMaxForce(goal->command.max_effort);
 
     std::unique_lock<std::mutex> guard(gripper_states_mutex_);
-    auto result = std::make_shared<control_msgs::action::GripperCommand::Result>();
+    auto result = std::make_shared<GripperCommand::Result>();
+    if (goal->command.position.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "Gripper goal has no commanded position");
+        FillGripperState(result->state, current_gripper_states_);
+        goal_handle->abort(result);
+        return;
+    }
+    const double target_width = goal->command.position[0];
+    // effort is optional in ParallelGripperCommand; 0 falls back to kDefaultMaxForce.
+    const double max_force
+        = EffectiveMaxForce(goal->command.effort.empty() ? 0.0 : goal->command.effort[0]);
+
     const double current_width = current_gripper_states_.width;
     if (target_width > gripper_->params().max_width || target_width < 0) {
         RCLCPP_ERROR(this->get_logger(), "Invalid gripper target width: %f. Max width = %f",
@@ -237,8 +257,7 @@ void GripperActionServer::ExecuteGripperCommand(
     // Skip dispatch only when already essentially at the requested width
     if (std::abs(target_width - current_width) < kGripperWidthTolerance) {
         RCLCPP_INFO(this->get_logger(), "Gripper is already at the target width: %f", target_width);
-        result->effort = current_gripper_states_.force;
-        result->position = current_gripper_states_.width;
+        FillGripperState(result->state, current_gripper_states_);
         result->reached_goal = true;
         result->stalled = false;
         goal_handle->succeed(result);
@@ -382,8 +401,7 @@ void GripperActionServer::ExecuteGripperCommandHelper(
         std::lock_guard<std::mutex> guard(gripper_states_mutex_);
         current_gripper_states_ = final_states;
     }
-    result->position = final_states.width;
-    result->effort = final_states.force;
+    FillGripperState(result->state, final_states);
 
     // Direction-aware tolerance: opens may settle at the firmware's
     // natural rest position short of the target, while closes must stay
@@ -454,8 +472,7 @@ void GripperActionServer::PublishGripperCommandFeedback(
 {
     auto feedback = std::make_shared<GripperCommand::Feedback>();
     std::lock_guard<std::mutex> guard(gripper_states_mutex_);
-    feedback->position = current_gripper_states_.width;
-    feedback->effort = current_gripper_states_.force;
+    FillGripperState(feedback->state, current_gripper_states_);
     goal_handle->publish_feedback(feedback);
 }
 

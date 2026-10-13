@@ -13,6 +13,7 @@ This branch tracks [`release/lyrical-v1.9.4`](https://github.com/flexivrobotics/
 - **`streaming_position_controller`.** Forwards `sensor_msgs/msg/JointState` positions to the joint command interfaces with velocity clamping, for policies that publish joint targets directly.
 - **Blocking gripper commands.** The `GripperCommand` action waits for the motion to finish and reports a stall against a fraction of the commanded `max_effort`, so a grasp is not reported complete before the fingers have closed.
 - **Calibrated model export.** `flexiv_hardware/scripts/export_calibrated_model.py` writes the robot's calibrated kinematics into a URDF that the Isaac manipulation pipeline splices into its cuMotion description.
+- **Calibrated USD export.** `flexiv_calibration/scripts/generate_calibrated_usd.py` writes the calibrated joint frames into the public Rizon 4s USD asset for policy training in Isaac Lab. See [`flexiv_calibration`](flexiv_calibration/README.md#generate_calibrated_usdpy).
 
 Everything else is upstream. In particular, this branch no longer builds `ros2_control` / `ros2_controllers` from source and no longer wraps the RDK in a symbol-isolated shared library: `flexiv_rdk` v1.9.4 already ships as a self-contained library with its dependencies statically embedded and symbol-hidden, and Lyrical's `ros2_control` Debian packages are used directly.
 

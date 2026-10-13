@@ -34,4 +34,7 @@ install(TARGETS calibration_correction
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/)
 
+install(PROGRAMS scripts/generate_calibrated_usd.py
+  DESTINATION lib/${PROJECT_NAME})
+
 ament_package()
